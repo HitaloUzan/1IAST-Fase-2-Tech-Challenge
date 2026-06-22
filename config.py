@@ -1,4 +1,4 @@
-GCP_PROJECT_ID         = "project-516b6700-5d68-403c-860"
+GCP_PROJECT_ID         = "pipeline-alfabetizacao"
 BQ_DATASET_BRONZE      = "bronze"
 BQ_DATASET_SILVER      = "silver"
 BQ_DATASET_GOLD        = "gold"
