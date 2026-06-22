@@ -1,0 +1,38 @@
+name: Pipeline Alfabetização — Bronze → Silver → Gold
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Bronze Ingestion
+        run: python ingestion/batch/ingest_bronze.py
+
+      - name: Silver Transforms
+        run: python silver/transform_silver.py
+
+      - name: Gold Build
+        run: python gold/build_gold.py
+
+      - name: Quality Validation
+        run: python quality/validate.py

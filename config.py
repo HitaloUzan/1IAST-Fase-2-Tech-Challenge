@@ -1,0 +1,8 @@
+GCP_PROJECT_ID         = "project-516b6700-5d68-403c-860"
+BQ_DATASET_BRONZE      = "bronze"
+BQ_DATASET_SILVER      = "silver"
+BQ_DATASET_GOLD        = "gold"
+PUBSUB_TOPIC_ID        = "alfabetizacao-streaming"
+PUBSUB_SUBSCRIPTION_ID = "alfabetizacao-sub"
+BDD_PROJECT            = "basedosdados"
+BDD_DATASET            = "br_inep_avaliacao_alfabetizacao"
