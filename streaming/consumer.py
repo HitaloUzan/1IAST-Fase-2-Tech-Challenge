@@ -17,17 +17,22 @@ from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE, PUBSUB_SUBSCRIPTION_ID
 TABLE_ID = f"{GCP_PROJECT_ID}.{BQ_DATASET_BRONZE}.streaming_eventos"
 
 SCHEMA = [
-    bigquery.SchemaField("tipo",                 "STRING"),
-    bigquery.SchemaField("timestamp",            "TIMESTAMP"),
-    bigquery.SchemaField("ano",                  "INTEGER"),
-    bigquery.SchemaField("sigla_uf",             "STRING"),
-    bigquery.SchemaField("serie",                "STRING"),
-    bigquery.SchemaField("rede",                 "STRING"),
-    bigquery.SchemaField("source",               "STRING"),
-    bigquery.SchemaField("taxa_alfabetizacao",   "FLOAT"),
-    bigquery.SchemaField("meta_2030",            "FLOAT"),
-    bigquery.SchemaField("pubsub_message_id",    "STRING"),
-    bigquery.SchemaField("ingestao_ts",          "TIMESTAMP"),
+    bigquery.SchemaField("tipo",                   "STRING"),
+    bigquery.SchemaField("timestamp",              "TIMESTAMP"),
+    bigquery.SchemaField("ano",                    "INTEGER"),
+    bigquery.SchemaField("sigla_uf",               "STRING"),
+    bigquery.SchemaField("serie",                  "STRING"),
+    bigquery.SchemaField("rede",                   "STRING"),
+    bigquery.SchemaField("source",                 "STRING"),
+    bigquery.SchemaField("taxa_alfabetizacao",     "FLOAT"),
+    bigquery.SchemaField("media_portugues",        "FLOAT"),
+    bigquery.SchemaField("meta_2030",              "FLOAT"),
+    bigquery.SchemaField("percentual_atingido",    "FLOAT"),
+    bigquery.SchemaField("taxa_anterior",          "FLOAT"),
+    bigquery.SchemaField("taxa_revisada",          "FLOAT"),
+    bigquery.SchemaField("motivo_revisao",         "STRING"),
+    bigquery.SchemaField("pubsub_message_id",      "STRING"),
+    bigquery.SchemaField("ingestao_ts",            "TIMESTAMP"),
 ]
 
 
@@ -43,17 +48,22 @@ def ensure_table(bq_client: bigquery.Client) -> None:
 def parse_message(message: pubsub_v1.subscriber.message.Message) -> dict:
     data = json.loads(message.data.decode("utf-8"))
     return {
-        "tipo":               data.get("tipo"),
-        "timestamp":          data.get("timestamp"),
-        "ano":                data.get("ano"),
-        "sigla_uf":           data.get("sigla_uf"),
-        "serie":              data.get("serie"),
-        "rede":               data.get("rede"),
-        "source":             data.get("source"),
-        "taxa_alfabetizacao": data.get("taxa_alfabetizacao"),
-        "meta_2030":          data.get("meta_2030"),
-        "pubsub_message_id":  message.message_id,
-        "ingestao_ts":        datetime.now(timezone.utc).isoformat(),
+        "tipo":                data.get("tipo"),
+        "timestamp":           data.get("timestamp"),
+        "ano":                 data.get("ano"),
+        "sigla_uf":            data.get("sigla_uf"),
+        "serie":               data.get("serie"),
+        "rede":                data.get("rede"),
+        "source":              data.get("source"),
+        "taxa_alfabetizacao":  data.get("taxa_alfabetizacao"),
+        "media_portugues":     data.get("media_portugues"),
+        "meta_2030":           data.get("meta_2030"),
+        "percentual_atingido": data.get("percentual_atingido"),
+        "taxa_anterior":       data.get("taxa_anterior"),
+        "taxa_revisada":       data.get("taxa_revisada"),
+        "motivo_revisao":      data.get("motivo_revisao"),
+        "pubsub_message_id":   message.message_id,
+        "ingestao_ts":         datetime.now(timezone.utc).isoformat(),
     }
 
 

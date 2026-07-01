@@ -71,6 +71,7 @@ TRANSFORMS = {
             meta_alfabetizacao_2029,
             meta_alfabetizacao_2030,
             percentual_participacao,
+            CAST(NULL AS STRING) AS nivel_alfabetizacao,
             'brasil' AS escopo,
             CURRENT_TIMESTAMP() AS silver_processado_ts
         FROM `{GCP_PROJECT_ID}.bronze.meta_brasil`
@@ -93,6 +94,7 @@ TRANSFORMS = {
             meta_alfabetizacao_2029,
             meta_alfabetizacao_2030,
             percentual_participacao,
+            CAST(NULL AS STRING) AS nivel_alfabetizacao,
             'uf' AS escopo,
             CURRENT_TIMESTAMP() AS silver_processado_ts
         FROM `{GCP_PROJECT_ID}.bronze.meta_uf`
@@ -115,6 +117,7 @@ TRANSFORMS = {
             meta_alfabetizacao_2029,
             meta_alfabetizacao_2030,
             percentual_participacao,
+            CAST(nivel_alfabetizacao AS STRING) AS nivel_alfabetizacao,
             'municipio' AS escopo,
             CURRENT_TIMESTAMP() AS silver_processado_ts
         FROM `{GCP_PROJECT_ID}.bronze.meta_municipio`

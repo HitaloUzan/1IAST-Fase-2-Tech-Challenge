@@ -97,7 +97,7 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
 
 ### Pré-requisitos
 
-1. Conta GCP com projeto `project-516b6700-5d68-403c-860`
+1. Conta GCP com projeto `pipeline-alfabetizacao`
 2. APIs habilitadas: BigQuery API, Pub/Sub API
 3. Service Account com roles:
    - `BigQuery Data Editor`
