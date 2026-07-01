@@ -21,6 +21,9 @@ TRANSFORMS = {
             FROM `{GCP_PROJECT_ID}.bronze.alfabetizacao_uf`
             WHERE taxa_alfabetizacao IS NOT NULL
               AND taxa_alfabetizacao BETWEEN 0 AND 100
+              AND nome_uf IS NOT NULL
+              AND serie IS NOT NULL
+              AND rede IS NOT NULL
         )
         SELECT
             ano,
@@ -30,16 +33,16 @@ TRANSFORMS = {
             serie,
             rede,
             taxa_alfabetizacao,
-            media_portugues,
-            proporcao_aluno_nivel_0,
-            proporcao_aluno_nivel_1,
-            proporcao_aluno_nivel_2,
-            proporcao_aluno_nivel_3,
-            proporcao_aluno_nivel_4,
-            proporcao_aluno_nivel_5,
-            proporcao_aluno_nivel_6,
-            proporcao_aluno_nivel_7,
-            proporcao_aluno_nivel_8,
+            COALESCE(media_portugues, 0) AS media_portugues,
+            COALESCE(proporcao_aluno_nivel_0, 0) AS proporcao_aluno_nivel_0,
+            COALESCE(proporcao_aluno_nivel_1, 0) AS proporcao_aluno_nivel_1,
+            COALESCE(proporcao_aluno_nivel_2, 0) AS proporcao_aluno_nivel_2,
+            COALESCE(proporcao_aluno_nivel_3, 0) AS proporcao_aluno_nivel_3,
+            COALESCE(proporcao_aluno_nivel_4, 0) AS proporcao_aluno_nivel_4,
+            COALESCE(proporcao_aluno_nivel_5, 0) AS proporcao_aluno_nivel_5,
+            COALESCE(proporcao_aluno_nivel_6, 0) AS proporcao_aluno_nivel_6,
+            COALESCE(proporcao_aluno_nivel_7, 0) AS proporcao_aluno_nivel_7,
+            COALESCE(proporcao_aluno_nivel_8, 0) AS proporcao_aluno_nivel_8,
             COALESCE(proporcao_aluno_nivel_0, 0) + COALESCE(proporcao_aluno_nivel_1, 0)
                 AS proporcao_abaixo_basico,
             COALESCE(proporcao_aluno_nivel_2, 0) + COALESCE(proporcao_aluno_nivel_3, 0)
@@ -75,6 +78,16 @@ TRANSFORMS = {
             'brasil' AS escopo,
             CURRENT_TIMESTAMP() AS silver_processado_ts
         FROM `{GCP_PROJECT_ID}.bronze.meta_brasil`
+        WHERE rede IS NOT NULL
+          AND taxa_alfabetizacao IS NOT NULL
+          AND meta_alfabetizacao_2024 IS NOT NULL
+          AND meta_alfabetizacao_2025 IS NOT NULL
+          AND meta_alfabetizacao_2026 IS NOT NULL
+          AND meta_alfabetizacao_2027 IS NOT NULL
+          AND meta_alfabetizacao_2028 IS NOT NULL
+          AND meta_alfabetizacao_2029 IS NOT NULL
+          AND meta_alfabetizacao_2030 IS NOT NULL
+          AND percentual_participacao IS NOT NULL
 
         UNION ALL
 
@@ -98,6 +111,18 @@ TRANSFORMS = {
             'uf' AS escopo,
             CURRENT_TIMESTAMP() AS silver_processado_ts
         FROM `{GCP_PROJECT_ID}.bronze.meta_uf`
+        WHERE sigla_uf IS NOT NULL
+          AND nome_uf IS NOT NULL
+          AND rede IS NOT NULL
+          AND taxa_alfabetizacao IS NOT NULL
+          AND meta_alfabetizacao_2024 IS NOT NULL
+          AND meta_alfabetizacao_2025 IS NOT NULL
+          AND meta_alfabetizacao_2026 IS NOT NULL
+          AND meta_alfabetizacao_2027 IS NOT NULL
+          AND meta_alfabetizacao_2028 IS NOT NULL
+          AND meta_alfabetizacao_2029 IS NOT NULL
+          AND meta_alfabetizacao_2030 IS NOT NULL
+          AND percentual_participacao IS NOT NULL
 
         UNION ALL
 
@@ -121,6 +146,18 @@ TRANSFORMS = {
             'municipio' AS escopo,
             CURRENT_TIMESTAMP() AS silver_processado_ts
         FROM `{GCP_PROJECT_ID}.bronze.meta_municipio`
+        WHERE id_municipio IS NOT NULL
+          AND nome_municipio IS NOT NULL
+          AND rede IS NOT NULL
+          AND taxa_alfabetizacao IS NOT NULL
+          AND meta_alfabetizacao_2024 IS NOT NULL
+          AND meta_alfabetizacao_2025 IS NOT NULL
+          AND meta_alfabetizacao_2026 IS NOT NULL
+          AND meta_alfabetizacao_2027 IS NOT NULL
+          AND meta_alfabetizacao_2028 IS NOT NULL
+          AND meta_alfabetizacao_2029 IS NOT NULL
+          AND meta_alfabetizacao_2030 IS NOT NULL
+          AND percentual_participacao IS NOT NULL
     """,
 
     "alfabetizacao_municipio_clean": f"""
@@ -133,6 +170,9 @@ TRANSFORMS = {
             FROM `{GCP_PROJECT_ID}.bronze.alfabetizacao_municipio`
             WHERE taxa_alfabetizacao IS NOT NULL
               AND taxa_alfabetizacao BETWEEN 0 AND 100
+              AND nome_municipio IS NOT NULL
+              AND serie IS NOT NULL
+              AND rede IS NOT NULL
         )
         SELECT
             ano,
@@ -141,16 +181,16 @@ TRANSFORMS = {
             serie,
             rede,
             taxa_alfabetizacao,
-            media_portugues,
-            proporcao_aluno_nivel_0,
-            proporcao_aluno_nivel_1,
-            proporcao_aluno_nivel_2,
-            proporcao_aluno_nivel_3,
-            proporcao_aluno_nivel_4,
-            proporcao_aluno_nivel_5,
-            proporcao_aluno_nivel_6,
-            proporcao_aluno_nivel_7,
-            proporcao_aluno_nivel_8,
+            COALESCE(media_portugues, 0) AS media_portugues,
+            COALESCE(proporcao_aluno_nivel_0, 0) AS proporcao_aluno_nivel_0,
+            COALESCE(proporcao_aluno_nivel_1, 0) AS proporcao_aluno_nivel_1,
+            COALESCE(proporcao_aluno_nivel_2, 0) AS proporcao_aluno_nivel_2,
+            COALESCE(proporcao_aluno_nivel_3, 0) AS proporcao_aluno_nivel_3,
+            COALESCE(proporcao_aluno_nivel_4, 0) AS proporcao_aluno_nivel_4,
+            COALESCE(proporcao_aluno_nivel_5, 0) AS proporcao_aluno_nivel_5,
+            COALESCE(proporcao_aluno_nivel_6, 0) AS proporcao_aluno_nivel_6,
+            COALESCE(proporcao_aluno_nivel_7, 0) AS proporcao_aluno_nivel_7,
+            COALESCE(proporcao_aluno_nivel_8, 0) AS proporcao_aluno_nivel_8,
             COALESCE(proporcao_aluno_nivel_0, 0) + COALESCE(proporcao_aluno_nivel_1, 0)
                 AS proporcao_abaixo_basico,
             COALESCE(proporcao_aluno_nivel_2, 0) + COALESCE(proporcao_aluno_nivel_3, 0)
@@ -185,6 +225,13 @@ TRANSFORMS = {
         FROM `{GCP_PROJECT_ID}.bronze.alunos`
         WHERE presenca = 'Presente'
           AND proficiencia IS NOT NULL
+          AND nome_municipio IS NOT NULL
+          AND serie IS NOT NULL
+          AND rede IS NOT NULL
+          AND preenchimento_caderno IS NOT NULL
+          AND alfabetizado IS NOT NULL
+          AND peso_aluno IS NOT NULL
+          AND caderno IS NOT NULL
     """,
 }
 
