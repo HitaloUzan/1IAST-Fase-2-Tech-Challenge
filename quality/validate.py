@@ -115,13 +115,36 @@ def validate_silver(client: bigquery.Client) -> list:
             errors,
         )
 
-    exists, _ = table_exists_and_has_rows(client, "silver", "alfabetizacao_uf_clean")
-    if exists:
-        nulls = query_scalar(client, f"""
-            SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.silver.alfabetizacao_uf_clean`
-            WHERE ano IS NULL OR sigla_uf IS NULL OR taxa_alfabetizacao IS NULL
-        """)
-        check(nulls == 0, f"silver.alfabetizacao_uf_clean no nulls in critical cols (found {nulls})", errors)
+    silver_null_checks = {
+        "alfabetizacao_uf_clean": """
+            ano IS NULL OR sigla_uf IS NULL OR nome_uf IS NULL OR serie IS NULL
+            OR rede IS NULL OR taxa_alfabetizacao IS NULL OR media_portugues IS NULL
+            OR proporcao_aluno_nivel_0 IS NULL OR proporcao_aluno_nivel_8 IS NULL
+        """,
+        "metas_consolidadas": """
+            ano IS NULL OR rede IS NULL OR taxa_alfabetizacao IS NULL
+            OR meta_alfabetizacao_2030 IS NULL OR percentual_participacao IS NULL
+            OR escopo IS NULL
+        """,
+        "alfabetizacao_municipio_clean": """
+            ano IS NULL OR id_municipio IS NULL OR nome_municipio IS NULL
+            OR serie IS NULL OR rede IS NULL OR taxa_alfabetizacao IS NULL
+            OR media_portugues IS NULL
+        """,
+        "alunos_clean": """
+            ano IS NULL OR id_municipio IS NULL OR nome_municipio IS NULL
+            OR serie IS NULL OR rede IS NULL OR presenca IS NULL
+            OR preenchimento_caderno IS NULL OR alfabetizado IS NULL
+            OR proficiencia IS NULL OR peso_aluno IS NULL
+        """,
+    }
+    for tbl, condition in silver_null_checks.items():
+        exists, _ = table_exists_and_has_rows(client, "silver", tbl)
+        if exists:
+            nulls = query_scalar(client, f"""
+                SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.silver.{tbl}` WHERE {condition}
+            """)
+            check(nulls == 0, f"silver.{tbl} no nulls in critical cols (found {nulls})", errors)
 
     return errors
 
@@ -139,14 +162,50 @@ def validate_gold(client: bigquery.Client) -> list:
         state_count = query_scalar(client, f"""
             SELECT COUNT(DISTINCT sigla_uf) FROM `{GCP_PROJECT_ID}.gold.ranking_estados`
         """)
-        silver_state_count = query_scalar(client, f"""
-            SELECT COUNT(DISTINCT sigla_uf) FROM `{GCP_PROJECT_ID}.silver.alfabetizacao_uf_clean`
+        # ranking_estados INNER JOINs against metas_consolidadas to avoid NULL
+        # gap_meta, so its universe is states with a *complete* meta target —
+        # not every state in alfabetizacao_uf_clean (some lack meta data at
+        # the source, e.g. AC has no meta_alfabetizacao_2024 in bronze.meta_uf).
+        states_with_meta = query_scalar(client, f"""
+            SELECT COUNT(DISTINCT sigla_uf) FROM `{GCP_PROJECT_ID}.silver.metas_consolidadas`
+            WHERE escopo = 'uf' AND sigla_uf IS NOT NULL
         """) or 0
         check(
-            state_count >= silver_state_count,
-            f"gold.ranking_estados covers all silver states ({state_count}/{silver_state_count})",
+            state_count == states_with_meta,
+            f"gold.ranking_estados covers all states with complete meta data ({state_count}/{states_with_meta})",
             errors,
         )
+
+    gold_null_checks = {
+        "indicador_por_uf_ano": """
+            ano IS NULL OR sigla_uf IS NULL OR taxa_media IS NULL
+            OR meta_2030 IS NULL OR gap_meta IS NULL
+        """,
+        "evolucao_temporal_brasil": """
+            ano IS NULL OR serie IS NULL OR taxa_media_brasil IS NULL
+            OR desvio_padrao IS NULL OR qtd_estados IS NULL
+        """,
+        "ranking_estados": """
+            posicao IS NULL OR sigla_uf IS NULL OR taxa_media IS NULL
+            OR meta_2030 IS NULL OR gap_meta IS NULL OR classificacao IS NULL
+        """,
+        "perfil_desempenho_uf": """
+            ano IS NULL OR sigla_uf IS NULL OR serie IS NULL OR rede IS NULL
+            OR taxa_alfabetizacao IS NULL OR proporcao_topo IS NULL
+        """,
+        "painel_municipios": """
+            id_municipio IS NULL OR nome_municipio IS NULL OR ano IS NULL
+            OR taxa_media IS NULL OR meta_2030 IS NULL OR gap_meta IS NULL
+            OR atingiu_meta IS NULL
+        """,
+    }
+    for tbl, condition in gold_null_checks.items():
+        exists, _ = table_exists_and_has_rows(client, "gold", tbl)
+        if exists:
+            nulls = query_scalar(client, f"""
+                SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.gold.{tbl}` WHERE {condition}
+            """)
+            check(nulls == 0, f"gold.{tbl} no nulls in critical cols (found {nulls})", errors)
 
     return errors
 

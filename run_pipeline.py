@@ -40,6 +40,7 @@ def main() -> None:
             continue
         if not run_step(name, cmd):
             failed.append(name)
+            break
 
     elapsed = (datetime.now() - pipeline_start).total_seconds()
 

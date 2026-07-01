@@ -8,19 +8,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 sys.path.insert(0, ".")
-from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE
+from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE, BDD_PROJECT, BDD_DATASET, BDD_DIR_DATASET
+
+BDD_SRC = f"{BDD_PROJECT}.{BDD_DATASET}"
+BDD_DIR = f"{BDD_PROJECT}.{BDD_DIR_DATASET}"
 
 TABLES = {
-    "alfabetizacao_uf": """
+    "alfabetizacao_uf": f"""
         WITH
         dicionario_serie AS (
             SELECT chave AS chave_serie, valor AS descricao_serie
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'serie' AND id_tabela = 'uf'
         ),
         dicionario_rede AS (
             SELECT chave AS chave_rede, valor AS descricao_rede
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'rede' AND id_tabela = 'uf'
         )
         SELECT
@@ -41,14 +44,14 @@ TABLES = {
             dados.proporcao_aluno_nivel_7,
             dados.proporcao_aluno_nivel_8,
             CURRENT_TIMESTAMP() AS ingestao_ts
-        FROM `basedosdados.br_inep_avaliacao_alfabetizacao.uf` AS dados
-        LEFT JOIN (SELECT DISTINCT sigla, nome FROM `basedosdados.br_bd_diretorios_brasil.uf`) AS diretorio_sigla_uf
+        FROM `{BDD_SRC}.uf` AS dados
+        LEFT JOIN (SELECT DISTINCT sigla, nome FROM `{BDD_DIR}.uf`) AS diretorio_sigla_uf
             ON dados.sigla_uf = diretorio_sigla_uf.sigla
-        LEFT JOIN dicionario_serie ON dados.serie = chave_serie
-        LEFT JOIN dicionario_rede  ON dados.rede  = chave_rede
+        LEFT JOIN dicionario_serie ON CAST(dados.serie AS STRING) = chave_serie
+        LEFT JOIN dicionario_rede  ON CAST(dados.rede  AS STRING) = chave_rede
     """,
 
-    "meta_brasil": """
+    "meta_brasil": f"""
         SELECT
             dados.ano,
             dados.rede,
@@ -62,10 +65,10 @@ TABLES = {
             dados.meta_alfabetizacao_2030,
             dados.percentual_participacao,
             CURRENT_TIMESTAMP() AS ingestao_ts
-        FROM `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_brasil` AS dados
+        FROM `{BDD_SRC}.meta_alfabetizacao_brasil` AS dados
     """,
 
-    "meta_uf": """
+    "meta_uf": f"""
         SELECT
             dados.ano,
             dados.sigla_uf,
@@ -81,12 +84,12 @@ TABLES = {
             dados.meta_alfabetizacao_2030,
             dados.percentual_participacao,
             CURRENT_TIMESTAMP() AS ingestao_ts
-        FROM `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_uf` AS dados
-        LEFT JOIN (SELECT DISTINCT sigla, nome FROM `basedosdados.br_bd_diretorios_brasil.uf`) AS diretorio_sigla_uf
+        FROM `{BDD_SRC}.meta_alfabetizacao_uf` AS dados
+        LEFT JOIN (SELECT DISTINCT sigla, nome FROM `{BDD_DIR}.uf`) AS diretorio_sigla_uf
             ON dados.sigla_uf = diretorio_sigla_uf.sigla
     """,
 
-    "meta_municipio": """
+    "meta_municipio": f"""
         SELECT
             dados.ano,
             dados.id_municipio,
@@ -103,21 +106,21 @@ TABLES = {
             dados.nivel_alfabetizacao,
             dados.percentual_participacao,
             CURRENT_TIMESTAMP() AS ingestao_ts
-        FROM `basedosdados.br_inep_avaliacao_alfabetizacao.meta_alfabetizacao_municipio` AS dados
-        LEFT JOIN (SELECT DISTINCT id_municipio, nome FROM `basedosdados.br_bd_diretorios_brasil.municipio`) AS diretorio_id_municipio
-            ON dados.id_municipio = diretorio_id_municipio.id_municipio
+        FROM `{BDD_SRC}.meta_alfabetizacao_municipio` AS dados
+        LEFT JOIN (SELECT DISTINCT id_municipio, nome FROM `{BDD_DIR}.municipio`) AS diretorio_id_municipio
+            ON CAST(dados.id_municipio AS STRING) = CAST(diretorio_id_municipio.id_municipio AS STRING)
     """,
 
-    "alfabetizacao_municipio": """
+    "alfabetizacao_municipio": f"""
         WITH
         dicionario_serie AS (
             SELECT chave AS chave_serie, valor AS descricao_serie
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'serie' AND id_tabela = 'municipio'
         ),
         dicionario_rede AS (
             SELECT chave AS chave_rede, valor AS descricao_rede
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'rede' AND id_tabela = 'municipio'
         )
         SELECT
@@ -138,38 +141,38 @@ TABLES = {
             dados.proporcao_aluno_nivel_7,
             dados.proporcao_aluno_nivel_8,
             CURRENT_TIMESTAMP() AS ingestao_ts
-        FROM `basedosdados.br_inep_avaliacao_alfabetizacao.municipio` AS dados
-        LEFT JOIN (SELECT DISTINCT id_municipio, nome FROM `basedosdados.br_bd_diretorios_brasil.municipio`) AS diretorio_id_municipio
-            ON dados.id_municipio = diretorio_id_municipio.id_municipio
-        LEFT JOIN dicionario_serie ON dados.serie = chave_serie
-        LEFT JOIN dicionario_rede  ON dados.rede  = chave_rede
+        FROM `{BDD_SRC}.municipio` AS dados
+        LEFT JOIN (SELECT DISTINCT id_municipio, nome FROM `{BDD_DIR}.municipio`) AS diretorio_id_municipio
+            ON CAST(dados.id_municipio AS STRING) = CAST(diretorio_id_municipio.id_municipio AS STRING)
+        LEFT JOIN dicionario_serie ON CAST(dados.serie AS STRING) = chave_serie
+        LEFT JOIN dicionario_rede  ON CAST(dados.rede  AS STRING) = chave_rede
     """,
 
-    "alunos": """
+    "alunos": f"""
         WITH
         dicionario_serie AS (
             SELECT chave AS chave_serie, valor AS descricao_serie
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'serie' AND id_tabela = 'alunos'
         ),
         dicionario_rede AS (
             SELECT chave AS chave_rede, valor AS descricao_rede
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'rede' AND id_tabela = 'alunos'
         ),
         dicionario_presenca AS (
             SELECT chave AS chave_presenca, valor AS descricao_presenca
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'presenca' AND id_tabela = 'alunos'
         ),
         dicionario_preenchimento_caderno AS (
             SELECT chave AS chave_preenchimento_caderno, valor AS descricao_preenchimento_caderno
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'preenchimento_caderno' AND id_tabela = 'alunos'
         ),
         dicionario_alfabetizado AS (
             SELECT chave AS chave_alfabetizado, valor AS descricao_alfabetizado
-            FROM `basedosdados.br_inep_avaliacao_alfabetizacao.dicionario`
+            FROM `{BDD_SRC}.dicionario`
             WHERE nome_coluna = 'alfabetizado' AND id_tabela = 'alunos'
         )
         SELECT
@@ -187,14 +190,19 @@ TABLES = {
             dados.proficiencia,
             dados.peso_aluno,
             CURRENT_TIMESTAMP() AS ingestao_ts
-        FROM `basedosdados.br_inep_avaliacao_alfabetizacao.alunos` AS dados
-        LEFT JOIN (SELECT DISTINCT id_municipio, nome FROM `basedosdados.br_bd_diretorios_brasil.municipio`) AS diretorio_id_municipio
-            ON dados.id_municipio = diretorio_id_municipio.id_municipio
-        LEFT JOIN dicionario_serie ON dados.serie = chave_serie
-        LEFT JOIN dicionario_rede  ON dados.rede  = chave_rede
-        LEFT JOIN dicionario_presenca ON dados.presenca = chave_presenca
-        LEFT JOIN dicionario_preenchimento_caderno ON dados.preenchimento_caderno = chave_preenchimento_caderno
-        LEFT JOIN dicionario_alfabetizado ON dados.alfabetizado = chave_alfabetizado
+        FROM `{BDD_SRC}.alunos` AS dados
+        LEFT JOIN (SELECT DISTINCT id_municipio, nome FROM `{BDD_DIR}.municipio`) AS diretorio_id_municipio
+            ON CAST(dados.id_municipio AS STRING) = CAST(diretorio_id_municipio.id_municipio AS STRING)
+        LEFT JOIN dicionario_serie
+            ON CAST(dados.serie AS STRING) = chave_serie
+        LEFT JOIN dicionario_rede
+            ON CAST(dados.rede AS STRING) = chave_rede
+        LEFT JOIN dicionario_presenca
+            ON CAST(dados.presenca AS STRING) = chave_presenca
+        LEFT JOIN dicionario_preenchimento_caderno
+            ON CAST(dados.preenchimento_caderno AS STRING) = chave_preenchimento_caderno
+        LEFT JOIN dicionario_alfabetizado
+            ON CAST(dados.alfabetizado AS STRING) = chave_alfabetizado
     """,
 }
 

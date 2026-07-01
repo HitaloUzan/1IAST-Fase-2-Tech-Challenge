@@ -42,18 +42,18 @@ GOLD_TABLES = {
             m.meta_2030,
             r.taxa_media - m.meta_2030 AS gap_meta
         FROM ranked r
-        LEFT JOIN metas m ON r.sigla_uf = m.sigla_uf
+        INNER JOIN metas m ON r.sigla_uf = m.sigla_uf
     """,
 
     "evolucao_temporal_brasil": f"""
         SELECT
             ano,
             serie,
-            AVG(taxa_alfabetizacao)    AS taxa_media_brasil,
-            MIN(taxa_alfabetizacao)    AS taxa_min_estado,
-            MAX(taxa_alfabetizacao)    AS taxa_max_estado,
-            STDDEV(taxa_alfabetizacao) AS desvio_padrao,
-            COUNT(DISTINCT sigla_uf)   AS qtd_estados
+            AVG(taxa_alfabetizacao)             AS taxa_media_brasil,
+            MIN(taxa_alfabetizacao)             AS taxa_min_estado,
+            MAX(taxa_alfabetizacao)             AS taxa_max_estado,
+            COALESCE(STDDEV(taxa_alfabetizacao), 0) AS desvio_padrao,
+            COUNT(DISTINCT sigla_uf)            AS qtd_estados
         FROM `{GCP_PROJECT_ID}.silver.alfabetizacao_uf_clean`
         GROUP BY ano, serie
         ORDER BY ano, serie
@@ -94,7 +94,7 @@ GOLD_TABLES = {
                 ELSE 'Requer atenção'
             END AS classificacao
         FROM base b
-        LEFT JOIN metas m ON b.sigla_uf = m.sigla_uf
+        INNER JOIN metas m ON b.sigla_uf = m.sigla_uf
         ORDER BY posicao
     """,
 
@@ -148,10 +148,10 @@ GOLD_TABLES = {
             b.ano,
             b.taxa_media,
             m.meta_2030,
-            b.taxa_media - m.meta_2030                AS gap_meta,
-            b.taxa_media >= COALESCE(m.meta_2030, 100) AS atingiu_meta
+            b.taxa_media - m.meta_2030 AS gap_meta,
+            b.taxa_media >= m.meta_2030 AS atingiu_meta
         FROM base b
-        LEFT JOIN metas m ON CAST(b.id_municipio AS STRING) = m.id_municipio
+        INNER JOIN metas m ON CAST(b.id_municipio AS STRING) = m.id_municipio
     """,
 }
 
