@@ -190,6 +190,32 @@ Queries usam `SELECT` explícito (sem `SELECT *`) para minimizar bytes escaneado
 
 ---
 
+## Governança e Qualidade de Dados
+
+### Política de valores ausentes por camada
+
+| Camada | Tolerância a NULL | Justificativa |
+|---|---|---|
+| **Bronze** | Permitido | Raw layer — preserva os dados exatamente como vieram da fonte, sem transformação. Um `LEFT JOIN` de enriquecimento (nome de UF/município, descrição de série/rede) que não encontra correspondência gera NULL aqui, e isso é esperado: o histórico completo precisa ser preservado mesmo quando o enriquecimento falha. |
+| **Silver** | Não permitido | `transform_silver.py` filtra qualquer linha cujo enriquecimento do bronze tenha falhado (`nome_uf`, `nome_municipio`, `serie`, `rede` NULL) e aplica `COALESCE(..., 0)` nas colunas numéricas de distribuição (`proporcao_aluno_nivel_0..8`, `media_portugues`). `metas_consolidadas` exige que todas as colunas de meta (`meta_alfabetizacao_2024..2030`) estejam preenchidas antes de consolidar a linha. |
+| **Gold** | Não permitido | As tabelas gold fazem `INNER JOIN` (em vez de `LEFT JOIN`) contra `silver.metas_consolidadas`. Estados/municípios sem meta completa na fonte (ex.: Acre não tem `meta_alfabetizacao_2024` em nenhum ano de `bronze.meta_uf`) são **excluídos**, em vez de gerar `meta_2030`/`gap_meta` NULL. Isso garante que a camada analítica esteja sempre pronta para dashboards e treinamento de modelos, sem exigir tratamento de nulos a jusante.
+
+### Verificação de duplicidade
+
+`quality/validate.py` verifica ausência de chaves duplicadas em `bronze.alfabetizacao_uf` (`ano`, `sigla_uf`, `serie`, `rede`) e o `dedup` via `ROW_NUMBER()` no silver garante que apenas a ingestão mais recente (`ingestao_ts DESC`) sobrevive por chave.
+
+### Validação de chaves e consistência entre tabelas
+
+- `bronze.alfabetizacao_uf`: valida que todas as UFs pertencem ao conjunto das 27 UFs válidas.
+- `silver.alfabetizacao_uf_clean`/`alfabetizacao_municipio_clean`: taxa de alfabetização restrita a `[0, 100]`.
+- `gold.ranking_estados`: cobertura comparada contra `silver.metas_consolidadas` (não contra o total de UFs), já que o universo de estados elegíveis no gold é definido por quem tem meta completa, não por quem tem taxa de alfabetização.
+
+### Detecção de valores ausentes
+
+`quality/validate.py --camada all` roda um check de NULL em colunas críticas nas 4 tabelas silver e nas 5 tabelas gold, retornando `exit 1` se qualquer NULL for encontrado — o mesmo mecanismo que interrompe o GitHub Actions em caso de falha (ver seção Monitoramento).
+
+---
+
 ## Monitoramento e FinOps
 
 ### Monitoramento
