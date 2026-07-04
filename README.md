@@ -49,6 +49,7 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
     ║  silver.metas_consolidadas          ║
     ║  silver.alfabetizacao_municipio_clean║
     ║  silver.alunos_clean                ║
+    ║  silver.streaming_eventos_clean     ║
     ╚═══════════════╦═════════════════════╝
                     ║ build_gold.py
                     ║ agregação · ranking · JOIN metas
@@ -64,6 +65,14 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
             quality/validate.py
             checks bronze · silver · gold
 ```
+
+### Fluxo de Dados
+
+1. **Ingestão batch** (`ingest_bronze.py`): 6 consultas ao dataset público `basedosdados.br_inep_avaliacao_alfabetizacao` no BigQuery, enriquecidas com os diretórios de UF/município e o dicionário de códigos, gravadas em `bronze.*` por *full refresh* — as tabelas grandes já nascem particionadas por `ano` e clusterizadas por chave de consulta.
+2. **Ingestão streaming** (`producer.py` → Pub/Sub → `consumer.py`): eventos simulados de medição de desempenho, atualização de meta e revisão de indicador são publicados no tópico `alfabetizacao-streaming`; o consumidor cria a infraestrutura (tópico, subscription e tabela) se não existir, consome as mensagens e as grava em `bronze.streaming_eventos`.
+3. **Transformação silver** (`transform_silver.py`): deduplicação por chave via `ROW_NUMBER()`, filtro de linhas com enriquecimento incompleto, normalização de tipos e chaves, consolidação das 3 tabelas de metas em `silver.metas_consolidadas` e normalização dos eventos de streaming para formato longo (uma linha por métrica, sem NULL).
+4. **Camada gold** (`build_gold.py`): agregações por UF/ano, ranking de estados, evolução temporal, perfil de desempenho por níveis e painel municipal — todas com `INNER JOIN` contra as metas, prontas para dashboard e ML.
+5. **Qualidade** (`validate.py`): checks de existência/volume, duplicidade, domínio (UFs válidas, taxa em [0,100]), NULLs em colunas críticas e integridade referencial entre gold e silver; `exit 1` interrompe o CI em caso de falha.
 
 ---
 
@@ -147,6 +156,11 @@ python streaming/consumer.py --max-mensagens 20 --timeout 60
 python streaming/producer.py --eventos 20 --intervalo 1.0
 ```
 
+O consumidor e o produtor criam automaticamente o tópico, a subscription e a tabela
+`bronze.streaming_eventos` na primeira execução — para isso a service account precisa
+da role `Pub/Sub Editor` (que inclui `pubsub.topics.create`). Após consumir eventos,
+rode `python silver/transform_silver.py` para materializar `silver.streaming_eventos_clean`.
+
 ---
 
 ## GitHub Actions — Configuração
@@ -188,6 +202,10 @@ Todas as tabelas usam `WRITE_TRUNCATE` para garantir idempotência: reexecuçõe
 
 Queries usam `SELECT` explícito (sem `SELECT *`) para minimizar bytes escaneados. Os datasets bronze/silver/gold ficam no mesmo projeto GCP, eliminando cobranças de transferência entre projetos.
 
+### Particionamento e Clustering
+
+As tabelas grandes (`alunos` com ~3,9M linhas e `alfabetizacao_municipio`, no bronze e no silver) são **particionadas por `ano`** (range partitioning) e **clusterizadas** pelas chaves mais filtradas (`id_municipio`, `serie`); `metas_consolidadas` é clusterizada por `escopo`, usado como filtro em todas as queries gold. Tabelas pequenas (UF, metas nacionais, gold agregadas) ficam sem partição de propósito: particionar tabelas de poucos KB adiciona overhead de metadados sem nenhum ganho de *pruning* — uma decisão FinOps documentada, não um esquecimento.
+
 ---
 
 ## Governança e Qualidade de Dados
@@ -197,17 +215,18 @@ Queries usam `SELECT` explícito (sem `SELECT *`) para minimizar bytes escaneado
 | Camada | Tolerância a NULL | Justificativa |
 |---|---|---|
 | **Bronze** | Permitido | Raw layer — preserva os dados exatamente como vieram da fonte, sem transformação. Um `LEFT JOIN` de enriquecimento (nome de UF/município, descrição de série/rede) que não encontra correspondência gera NULL aqui, e isso é esperado: o histórico completo precisa ser preservado mesmo quando o enriquecimento falha. |
-| **Silver** | Não permitido | `transform_silver.py` filtra qualquer linha cujo enriquecimento do bronze tenha falhado (`nome_uf`, `nome_municipio`, `serie`, `rede` NULL) e aplica `COALESCE(..., 0)` nas colunas numéricas de distribuição (`proporcao_aluno_nivel_0..8`, `media_portugues`). `metas_consolidadas` exige que todas as colunas de meta (`meta_alfabetizacao_2024..2030`) estejam preenchidas antes de consolidar a linha. |
+| **Silver** | Não permitido | `transform_silver.py` filtra qualquer linha cujo enriquecimento do bronze tenha falhado (`nome_uf`, `nome_municipio`, `serie`, `rede` NULL) e aplica `COALESCE(..., 0)` nas colunas numéricas de distribuição (`proporcao_aluno_nivel_0..8`, `media_portugues`). `metas_consolidadas` exige que todas as colunas de meta (`meta_alfabetizacao_2024..2030`) estejam preenchidas antes de consolidar a linha. Os eventos de streaming, cujo payload é esparso por tipo de evento, são **despivotados para formato longo** (`streaming_eventos_clean`: uma linha por métrica preenchida), mantendo a camada 100% sem NULL sem inventar valores. |
 | **Gold** | Não permitido | As tabelas gold fazem `INNER JOIN` (em vez de `LEFT JOIN`) contra `silver.metas_consolidadas`. Estados/municípios sem meta completa na fonte (ex.: Acre não tem `meta_alfabetizacao_2024` em nenhum ano de `bronze.meta_uf`) são **excluídos**, em vez de gerar `meta_2030`/`gap_meta` NULL. Isso garante que a camada analítica esteja sempre pronta para dashboards e treinamento de modelos, sem exigir tratamento de nulos a jusante.
 
 ### Verificação de duplicidade
 
-`quality/validate.py` verifica ausência de chaves duplicadas em `bronze.alfabetizacao_uf` (`ano`, `sigla_uf`, `serie`, `rede`) e o `dedup` via `ROW_NUMBER()` no silver garante que apenas a ingestão mais recente (`ingestao_ts DESC`) sobrevive por chave.
+`quality/validate.py` verifica ausência de chaves duplicadas em `bronze.alfabetizacao_uf` (`ano`, `sigla_uf`, `serie`, `rede`) e de eventos duplicados em `silver.streaming_eventos_clean` (`pubsub_message_id`, `metrica`); o `dedup` via `ROW_NUMBER()` no silver garante que apenas a ingestão mais recente (`ingestao_ts DESC`) sobrevive por chave.
 
 ### Validação de chaves e consistência entre tabelas
 
-- `bronze.alfabetizacao_uf`: valida que todas as UFs pertencem ao conjunto das 27 UFs válidas.
+- `bronze.alfabetizacao_uf` e `silver.alfabetizacao_uf_clean`: valida que todas as UFs pertencem ao conjunto das 27 UFs válidas.
 - `silver.alfabetizacao_uf_clean`/`alfabetizacao_municipio_clean`: taxa de alfabetização restrita a `[0, 100]`.
+- **Integridade referencial gold → silver**: toda `sigla_uf` de `gold.indicador_por_uf_ano` e todo `id_municipio` de `gold.painel_municipios` devem existir em `silver.metas_consolidadas`, e toda UF de `gold.ranking_estados` deve existir em `silver.alfabetizacao_uf_clean` — chaves órfãs reprovam a validação.
 - `gold.ranking_estados`: cobertura comparada contra `silver.metas_consolidadas` (não contra o total de UFs), já que o universo de estados elegíveis no gold é definido por quem tem meta completa, não por quem tem taxa de alfabetização.
 
 ### Detecção de valores ausentes
@@ -223,6 +242,13 @@ Queries usam `SELECT` explícito (sem `SELECT *`) para minimizar bytes escaneado
 - Cada script registra timestamps, contagem de linhas e erros via `logging`
 - `quality/validate.py` retorna exit code 1 em falha, interrompendo o GitHub Actions e gerando alerta
 - O GitHub Actions notifica falhas por e-mail automaticamente
+
+### FinOps — Práticas Aplicadas
+
+- **Armazenamento colunar**: o BigQuery armazena tudo em formato colunar comprimido (Capacitor, equivalente gerenciado do Parquet) — leituras tocam apenas as colunas selecionadas.
+- **Particionamento por `ano` + clustering** nas tabelas grandes: queries analíticas que filtram por ano/município escaneiam só as partições e blocos relevantes (ver Decisões Arquiteturais).
+- **Full refresh idempotente**: reexecuções substituem as tabelas em vez de acumular versões, mantendo o storage estável.
+- **Queries com projeção explícita** (sem `SELECT *`) e agregações feitas uma única vez na gold, não a cada dashboard.
 
 ### FinOps — Estimativa de Custo
 
@@ -265,7 +291,7 @@ A camada Gold fornece datasets prontos para treinar modelos preditivos:
 │   └── batch/
 │       └── ingest_bronze.py      # Ingestão de 6 tabelas → bronze
 ├── silver/
-│   └── transform_silver.py       # 4 tabelas silver (limpeza + integração)
+│   └── transform_silver.py       # 5 tabelas silver (limpeza + integração + streaming)
 ├── gold/
 │   └── build_gold.py             # 5 tabelas analíticas gold
 ├── quality/
