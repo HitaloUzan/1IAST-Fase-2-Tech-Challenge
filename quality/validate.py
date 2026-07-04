@@ -146,6 +146,34 @@ def validate_silver(client: bigquery.Client) -> list:
             """)
             check(nulls == 0, f"silver.{tbl} no nulls in critical cols (found {nulls})", errors)
 
+    exists, _ = table_exists_and_has_rows(client, "silver", "alfabetizacao_uf_clean")
+    if exists:
+        invalid_ufs = query_scalar(client, f"""
+            SELECT COUNT(DISTINCT sigla_uf) FROM `{GCP_PROJECT_ID}.silver.alfabetizacao_uf_clean`
+            WHERE sigla_uf NOT IN ({','.join(f"'{u}'" for u in VALID_UFS)})
+        """)
+        check(invalid_ufs == 0, f"silver.alfabetizacao_uf_clean all UFs valid (invalid: {invalid_ufs})", errors)
+
+    # Streaming is optional: validated only when the demo has populated bronze.
+    exists, _ = table_exists_and_has_rows(client, "silver", "streaming_eventos_clean")
+    if exists:
+        stream_nulls = query_scalar(client, f"""
+            SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.silver.streaming_eventos_clean`
+            WHERE tipo IS NULL OR evento_ts IS NULL OR sigla_uf IS NULL
+               OR metrica IS NULL OR valor IS NULL OR pubsub_message_id IS NULL
+        """)
+        check(stream_nulls == 0, f"silver.streaming_eventos_clean no nulls in critical cols (found {stream_nulls})", errors)
+
+        stream_dupes = query_scalar(client, f"""
+            SELECT COUNT(*) FROM (
+                SELECT pubsub_message_id, metrica, COUNT(*) AS cnt
+                FROM `{GCP_PROJECT_ID}.silver.streaming_eventos_clean`
+                GROUP BY pubsub_message_id, metrica
+                HAVING cnt > 1
+            )
+        """)
+        check(stream_dupes == 0, f"silver.streaming_eventos_clean has no duplicate events (found {stream_dupes})", errors)
+
     return errors
 
 
@@ -206,6 +234,46 @@ def validate_gold(client: bigquery.Client) -> list:
                 SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.gold.{tbl}` WHERE {condition}
             """)
             check(nulls == 0, f"gold.{tbl} no nulls in critical cols (found {nulls})", errors)
+
+    # Referential integrity: every gold key must resolve to a silver dimension.
+    referential_deps = {
+        "gold.indicador_por_uf_ano -> silver.metas_consolidadas (sigla_uf)":
+            [("gold", "indicador_por_uf_ano"), ("silver", "metas_consolidadas")],
+        "gold.painel_municipios -> silver.metas_consolidadas (id_municipio)":
+            [("gold", "painel_municipios"), ("silver", "metas_consolidadas")],
+        "gold.ranking_estados -> silver.alfabetizacao_uf_clean (sigla_uf)":
+            [("gold", "ranking_estados"), ("silver", "alfabetizacao_uf_clean")],
+    }
+    referential_checks = {
+        "gold.indicador_por_uf_ano -> silver.metas_consolidadas (sigla_uf)": f"""
+            SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.gold.indicador_por_uf_ano` g
+            LEFT JOIN (
+                SELECT DISTINCT sigla_uf FROM `{GCP_PROJECT_ID}.silver.metas_consolidadas`
+                WHERE escopo = 'uf'
+            ) m ON g.sigla_uf = m.sigla_uf
+            WHERE m.sigla_uf IS NULL
+        """,
+        "gold.painel_municipios -> silver.metas_consolidadas (id_municipio)": f"""
+            SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.gold.painel_municipios` g
+            LEFT JOIN (
+                SELECT DISTINCT id_municipio FROM `{GCP_PROJECT_ID}.silver.metas_consolidadas`
+                WHERE escopo = 'municipio'
+            ) m ON CAST(g.id_municipio AS STRING) = m.id_municipio
+            WHERE m.id_municipio IS NULL
+        """,
+        "gold.ranking_estados -> silver.alfabetizacao_uf_clean (sigla_uf)": f"""
+            SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.gold.ranking_estados` g
+            LEFT JOIN (
+                SELECT DISTINCT sigla_uf FROM `{GCP_PROJECT_ID}.silver.alfabetizacao_uf_clean`
+            ) s ON g.sigla_uf = s.sigla_uf
+            WHERE s.sigla_uf IS NULL
+        """,
+    }
+    for name, sql in referential_checks.items():
+        if not all(table_exists_and_has_rows(client, ds, t)[0] for ds, t in referential_deps[name]):
+            continue
+        orphans = query_scalar(client, sql)
+        check(orphans == 0, f"{name} has no orphan keys (found {orphans})", errors)
 
     return errors
 
