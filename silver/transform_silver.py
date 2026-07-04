@@ -10,6 +10,15 @@ log = logging.getLogger(__name__)
 sys.path.insert(0, ".")
 from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE, BQ_DATASET_SILVER
 
+# FinOps: partition/cluster only tables large enough to benefit —
+# partitioning tiny tables adds metadata overhead without pruning gains.
+PARTITION_BY_ANO = {"alunos_clean", "alfabetizacao_municipio_clean"}
+CLUSTER_FIELDS = {
+    "alunos_clean": ["id_municipio", "serie"],
+    "alfabetizacao_municipio_clean": ["id_municipio"],
+    "metas_consolidadas": ["escopo"],
+}
+
 TRANSFORMS = {
     "alfabetizacao_uf_clean": f"""
         WITH dedup AS (
@@ -235,11 +244,62 @@ TRANSFORMS = {
     """,
 }
 
+# Streaming events carry a sparse payload (each event type fills a different
+# subset of metric columns). To keep the silver zero-NULL policy, events are
+# unpivoted to long format: one row per (event, metric), NULL metrics dropped.
+STREAMING_TRANSFORM = f"""
+    WITH dedup AS (
+        SELECT *,
+            ROW_NUMBER() OVER (
+                PARTITION BY pubsub_message_id
+                ORDER BY ingestao_ts DESC
+            ) AS rn
+        FROM `{GCP_PROJECT_ID}.bronze.streaming_eventos`
+        WHERE tipo IS NOT NULL
+          AND timestamp IS NOT NULL
+          AND sigla_uf IS NOT NULL
+          AND pubsub_message_id IS NOT NULL
+          AND (taxa_alfabetizacao IS NULL OR taxa_alfabetizacao BETWEEN 0 AND 100)
+    )
+    SELECT
+        tipo,
+        timestamp AS evento_ts,
+        ano,
+        sigla_uf,
+        serie,
+        rede,
+        source,
+        metrica,
+        valor,
+        pubsub_message_id,
+        ingestao_ts,
+        CURRENT_TIMESTAMP() AS silver_processado_ts
+    FROM dedup,
+    UNNEST([
+        STRUCT('taxa_alfabetizacao'  AS metrica, CAST(taxa_alfabetizacao  AS STRING) AS valor),
+        STRUCT('media_portugues'     AS metrica, CAST(media_portugues     AS STRING) AS valor),
+        STRUCT('meta_2030'           AS metrica, CAST(meta_2030           AS STRING) AS valor),
+        STRUCT('percentual_atingido' AS metrica, CAST(percentual_atingido AS STRING) AS valor),
+        STRUCT('taxa_anterior'       AS metrica, CAST(taxa_anterior       AS STRING) AS valor),
+        STRUCT('taxa_revisada'       AS metrica, CAST(taxa_revisada       AS STRING) AS valor),
+        STRUCT('motivo_revisao'      AS metrica, motivo_revisao           AS valor)
+    ])
+    WHERE rn = 1 AND valor IS NOT NULL
+"""
+
 
 def ensure_dataset(client: bigquery.Client, dataset_id: str) -> None:
     dataset_ref = bigquery.Dataset(f"{GCP_PROJECT_ID}.{dataset_id}")
     dataset_ref.location = "US"
     client.create_dataset(dataset_ref, exists_ok=True)
+
+
+def bronze_table_exists(client: bigquery.Client, table_name: str) -> bool:
+    try:
+        client.get_table(f"{GCP_PROJECT_ID}.{BQ_DATASET_BRONZE}.{table_name}")
+        return True
+    except Exception:
+        return False
 
 
 def transform_table(client: bigquery.Client, table_name: str, query: str) -> int:
@@ -249,6 +309,13 @@ def transform_table(client: bigquery.Client, table_name: str, query: str) -> int
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
     )
+    if table_name in PARTITION_BY_ANO:
+        job_config.range_partitioning = bigquery.RangePartitioning(
+            field="ano",
+            range_=bigquery.PartitionRange(start=2019, end=2051, interval=1),
+        )
+    if table_name in CLUSTER_FIELDS:
+        job_config.clustering_fields = CLUSTER_FIELDS[table_name]
     log.info(f"Transforming silver.{table_name} ...")
     job = client.query(query, job_config=job_config)
     job.result()
@@ -267,7 +334,13 @@ def main() -> None:
     results = {}
     errors = []
 
-    for table_name, query in TRANSFORMS.items():
+    transforms = dict(TRANSFORMS)
+    if bronze_table_exists(client, "streaming_eventos"):
+        transforms["streaming_eventos_clean"] = STREAMING_TRANSFORM
+    else:
+        log.info("bronze.streaming_eventos not found — skipping streaming transform")
+
+    for table_name, query in transforms.items():
         try:
             rows = transform_table(client, table_name, query)
             results[table_name] = rows
