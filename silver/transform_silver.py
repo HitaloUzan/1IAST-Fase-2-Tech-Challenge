@@ -10,6 +10,15 @@ log = logging.getLogger(__name__)
 sys.path.insert(0, ".")
 from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE, BQ_DATASET_SILVER
 
+# FinOps: partition/cluster only tables large enough to benefit —
+# partitioning tiny tables adds metadata overhead without pruning gains.
+PARTITION_BY_ANO = {"alunos_clean", "alfabetizacao_municipio_clean"}
+CLUSTER_FIELDS = {
+    "alunos_clean": ["id_municipio", "serie"],
+    "alfabetizacao_municipio_clean": ["id_municipio"],
+    "metas_consolidadas": ["escopo"],
+}
+
 TRANSFORMS = {
     "alfabetizacao_uf_clean": f"""
         WITH dedup AS (
@@ -235,7 +244,6 @@ TRANSFORMS = {
     """,
 }
 
-
 def ensure_dataset(client: bigquery.Client, dataset_id: str) -> None:
     dataset_ref = bigquery.Dataset(f"{GCP_PROJECT_ID}.{dataset_id}")
     dataset_ref.location = "US"
@@ -249,6 +257,13 @@ def transform_table(client: bigquery.Client, table_name: str, query: str) -> int
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
     )
+    if table_name in PARTITION_BY_ANO:
+        job_config.range_partitioning = bigquery.RangePartitioning(
+            field="ano",
+            range_=bigquery.PartitionRange(start=2019, end=2051, interval=1),
+        )
+    if table_name in CLUSTER_FIELDS:
+        job_config.clustering_fields = CLUSTER_FIELDS[table_name]
     log.info(f"Transforming silver.{table_name} ...")
     job = client.query(query, job_config=job_config)
     job.result()

@@ -13,6 +13,15 @@ from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE, BDD_PROJECT, BDD_DATASET, 
 BDD_SRC = f"{BDD_PROJECT}.{BDD_DATASET}"
 BDD_DIR = f"{BDD_PROJECT}.{BDD_DIR_DATASET}"
 
+# FinOps: partition/cluster only tables large enough to benefit —
+# partitioning tiny tables adds metadata overhead without pruning gains.
+PARTITION_BY_ANO = {"alunos", "alfabetizacao_municipio"}
+CLUSTER_FIELDS = {
+    "alunos": ["id_municipio", "serie"],
+    "alfabetizacao_municipio": ["id_municipio"],
+    "meta_municipio": ["id_municipio"],
+}
+
 TABLES = {
     "alfabetizacao_uf": f"""
         WITH
@@ -220,6 +229,13 @@ def ingest_table(client: bigquery.Client, table_name: str, query: str) -> int:
         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
         create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
     )
+    if table_name in PARTITION_BY_ANO:
+        job_config.range_partitioning = bigquery.RangePartitioning(
+            field="ano",
+            range_=bigquery.PartitionRange(start=2019, end=2051, interval=1),
+        )
+    if table_name in CLUSTER_FIELDS:
+        job_config.clustering_fields = CLUSTER_FIELDS[table_name]
     log.info(f"Ingesting bronze.{table_name} ...")
     job = client.query(query, job_config=job_config)
     job.result()
