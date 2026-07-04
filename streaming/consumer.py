@@ -124,11 +124,15 @@ def main() -> None:
     streaming_pull.result()
 
     if received:
-        errors = bq_client.insert_rows_json(TABLE_ID, received)
-        if errors:
-            log.error(f"BigQuery insert errors: {errors}")
-            sys.exit(1)
-        log.info(f"Inserted {len(received)} rows into bronze.streaming_eventos")
+        # Micro-batch load job instead of insert_rows_json: streaming inserts
+        # are billed (and blocked on the free tier), load jobs are free.
+        job_config = bigquery.LoadJobConfig(
+            schema=SCHEMA,
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        )
+        job = bq_client.load_table_from_json(received, TABLE_ID, job_config=job_config)
+        job.result()
+        log.info(f"Loaded {len(received)} rows into bronze.streaming_eventos")
     else:
         log.info("No messages received")
 

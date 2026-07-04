@@ -248,6 +248,7 @@ As tabelas grandes (`alunos` com ~3,9M linhas e `alfabetizacao_municipio`, no br
 - **Armazenamento colunar**: o BigQuery armazena tudo em formato colunar comprimido (Capacitor, equivalente gerenciado do Parquet) — leituras tocam apenas as colunas selecionadas.
 - **Particionamento por `ano` + clustering** nas tabelas grandes: queries analíticas que filtram por ano/município escaneiam só as partições e blocos relevantes (ver Decisões Arquiteturais).
 - **Full refresh idempotente**: reexecuções substituem as tabelas em vez de acumular versões, mantendo o storage estável.
+- **Micro-lote em vez de streaming insert**: o consumidor grava os eventos consumidos via *load job* (gratuito e ilimitado no BigQuery) em vez do `insertAll` de streaming, que é cobrado por volume — mesma latência prática para o caso de uso e custo zero.
 - **Queries com projeção explícita** (sem `SELECT *`) e agregações feitas uma única vez na gold, não a cada dashboard.
 
 ### FinOps — Estimativa de Custo
