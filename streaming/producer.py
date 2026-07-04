@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 from google.cloud import pubsub_v1
+from google.api_core.exceptions import NotFound
 import google.auth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -45,6 +46,14 @@ def build_event(tipo: str) -> dict:
     return base
 
 
+def ensure_topic(publisher: pubsub_v1.PublisherClient, topic_path: str) -> None:
+    try:
+        publisher.get_topic(topic=topic_path)
+    except NotFound:
+        publisher.create_topic(name=topic_path)
+        log.info(f"Created topic {topic_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--eventos",   type=int,   default=10,  help="Number of events to publish")
@@ -55,6 +64,7 @@ def main() -> None:
     publisher = pubsub_v1.PublisherClient(credentials=credentials)
     topic_path = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC_ID)
 
+    ensure_topic(publisher, topic_path)
     log.info(f"Publishing {args.eventos} events to {topic_path}")
 
     published = 0

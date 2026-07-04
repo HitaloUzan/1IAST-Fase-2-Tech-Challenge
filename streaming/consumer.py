@@ -2,17 +2,18 @@ import sys
 import json
 import argparse
 import logging
+import threading
 from datetime import datetime, timezone
-from concurrent.futures import TimeoutError
 
 from google.cloud import pubsub_v1, bigquery
+from google.api_core.exceptions import NotFound
 import google.auth
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 sys.path.insert(0, ".")
-from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE, PUBSUB_SUBSCRIPTION_ID
+from config import GCP_PROJECT_ID, BQ_DATASET_BRONZE, PUBSUB_TOPIC_ID, PUBSUB_SUBSCRIPTION_ID
 
 TABLE_ID = f"{GCP_PROJECT_ID}.{BQ_DATASET_BRONZE}.streaming_eventos"
 
@@ -43,6 +44,24 @@ def ensure_table(bq_client: bigquery.Client) -> None:
 
     table_ref = bigquery.Table(TABLE_ID, schema=SCHEMA)
     bq_client.create_table(table_ref, exists_ok=True)
+
+
+def ensure_subscription(credentials, subscription_path: str) -> None:
+    publisher = pubsub_v1.PublisherClient(credentials=credentials)
+    topic_path = publisher.topic_path(GCP_PROJECT_ID, PUBSUB_TOPIC_ID)
+    try:
+        publisher.get_topic(topic=topic_path)
+    except NotFound:
+        publisher.create_topic(name=topic_path)
+        log.info(f"Created topic {topic_path}")
+
+    sub_client = pubsub_v1.SubscriberClient(credentials=credentials)
+    with sub_client:
+        try:
+            sub_client.get_subscription(subscription=subscription_path)
+        except NotFound:
+            sub_client.create_subscription(name=subscription_path, topic=topic_path)
+            log.info(f"Created subscription {subscription_path}")
 
 
 def parse_message(message: pubsub_v1.subscriber.message.Message) -> dict:
@@ -80,9 +99,11 @@ def main() -> None:
     ensure_table(bq_client)
 
     subscription_path = sub_client.subscription_path(GCP_PROJECT_ID, PUBSUB_SUBSCRIPTION_ID)
+    ensure_subscription(credentials, subscription_path)
     log.info(f"Listening on {subscription_path} (max={args.max_mensagens}, timeout={args.timeout}s)")
 
     received = []
+    done = threading.Event()
 
     def callback(message: pubsub_v1.subscriber.message.Message) -> None:
         try:
@@ -90,17 +111,17 @@ def main() -> None:
             received.append(row)
             message.ack()
             log.info(f"Received [{len(received)}] tipo={row['tipo']} uf={row['sigla_uf']}")
+            if len(received) >= args.max_mensagens:
+                done.set()
         except Exception as exc:
             log.error(f"Error processing message: {exc}")
             message.nack()
 
     streaming_pull = sub_client.subscribe(subscription_path, callback=callback)
 
-    try:
-        streaming_pull.result(timeout=args.timeout)
-    except TimeoutError:
-        streaming_pull.cancel()
-        streaming_pull.result()
+    done.wait(timeout=args.timeout)
+    streaming_pull.cancel()
+    streaming_pull.result()
 
     if received:
         errors = bq_client.insert_rows_json(TABLE_ID, received)
