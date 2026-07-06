@@ -68,8 +68,8 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
 
 ### Fluxo de Dados
 
-1. **Ingestão batch** (`ingest_bronze.py`): 6 consultas ao dataset público `basedosdados.br_inep_avaliacao_alfabetizacao` no BigQuery, enriquecidas com os diretórios de UF/município e o dicionário de códigos, gravadas em `bronze.*` por *full refresh* — as tabelas grandes já nascem particionadas por `ano` e clusterizadas por chave de consulta.
-2. **Ingestão streaming** (`producer.py` → Pub/Sub → `consumer.py`): eventos simulados de medição de desempenho, atualização de meta e revisão de indicador são publicados no tópico `alfabetizacao-streaming`; o consumidor cria a infraestrutura (tópico, subscription e tabela) se não existir, consome as mensagens e as grava em `bronze.streaming_eventos`.
+1. **Ingestão batch** (`ingest_bronze.py`): 6 consultas ao dataset público `basedosdados.br_inep_avaliacao_alfabetizacao` no BigQuery, enriquecidas com os diretórios de UF/município e o dicionário de códigos, gravadas em `bronze.*` por *full refresh* — as tabelas grandes já nascem particionadas por `ano` e clusterizadas por chave de consulta. Os códigos crus da fonte são preservados ao lado das descrições decodificadas (`serie_codigo`/`serie`, `rede_codigo`/`rede`, etc.), mantendo o bronze fiel ao raw data: o enriquecimento é aditivo, nunca substitui o dado original.
+2. **Ingestão streaming** (`producer.py` → Pub/Sub → `consumer.py`): eventos simulados de medição de desempenho, atualização de meta e revisão de indicador são publicados no tópico `alfabetizacao-streaming`; o consumidor cria a infraestrutura (tópico, subscription e tabela) se não existir, consome as mensagens e as grava em `bronze.streaming_eventos`. Roda automaticamente a cada execução do pipeline — sem intervenção manual — logo após a ingestão batch (ver `run_pipeline.py` e `.github/workflows/pipeline.yml`).
 3. **Transformação silver** (`transform_silver.py`): deduplicação por chave via `ROW_NUMBER()`, filtro de linhas com enriquecimento incompleto, normalização de tipos e chaves, consolidação das 3 tabelas de metas em `silver.metas_consolidadas` e normalização dos eventos de streaming para formato longo (uma linha por métrica, sem NULL).
 4. **Camada gold** (`build_gold.py`): agregações por UF/ano, ranking de estados, evolução temporal, perfil de desempenho por níveis e painel municipal — todas com `INNER JOIN` contra as metas, prontas para dashboard e ML.
 5. **Qualidade** (`validate.py`): checks de existência/volume, duplicidade, domínio (UFs válidas, taxa em [0,100]), NULLs em colunas críticas e integridade referencial entre gold e silver; `exit 1` interrompe o CI em caso de falha.
@@ -146,7 +146,15 @@ python quality/validate.py --camada silver
 python quality/validate.py --camada gold
 ```
 
-### Streaming (2 terminais separados)
+### Streaming
+
+`python run_pipeline.py` já orquestra o streaming automaticamente: sobe o consumidor em
+background, aguarda a subscription conectar, dispara o produtor e espera o consumidor
+finalizar antes de seguir para a camada silver — sem necessidade de terminais separados
+ou intervenção manual. Use `--skip-streaming` para pular essa etapa.
+
+Para rodar o streaming isoladamente (debug), ainda é possível disparar os dois scripts
+à mão em terminais separados:
 
 ```bash
 # Terminal 1 — consumidor (deve estar rodando antes do produtor)
@@ -159,13 +167,14 @@ python streaming/producer.py --eventos 20 --intervalo 1.0
 O consumidor e o produtor criam automaticamente o tópico, a subscription e a tabela
 `bronze.streaming_eventos` na primeira execução — para isso a service account precisa
 da role `Pub/Sub Editor` (que inclui `pubsub.topics.create`). Após consumir eventos,
-rode `python silver/transform_silver.py` para materializar `silver.streaming_eventos_clean`.
+rode `python silver/transform_silver.py` para materializar `silver.streaming_eventos_clean`
+(isso já é feito automaticamente pelo `run_pipeline.py` e pelo GitHub Actions).
 
 ---
 
 ## GitHub Actions — Configuração
 
-O workflow `.github/workflows/pipeline.yml` executa o pipeline completo automaticamente toda segunda-feira às 6h UTC e pode ser disparado manualmente.
+O workflow `.github/workflows/pipeline.yml` executa o pipeline completo — batch, streaming, silver, gold e qualidade — automaticamente todo dia às 6h UTC e pode ser disparado manualmente.
 
 ### Criando o secret `GCP_SA_KEY`
 
@@ -215,8 +224,8 @@ As tabelas grandes (`alunos` com ~3,9M linhas e `alfabetizacao_municipio`, no br
 | Camada | Tolerância a NULL | Justificativa |
 |---|---|---|
 | **Bronze** | Permitido | Raw layer — preserva os dados exatamente como vieram da fonte, sem transformação. Um `LEFT JOIN` de enriquecimento (nome de UF/município, descrição de série/rede) que não encontra correspondência gera NULL aqui, e isso é esperado: o histórico completo precisa ser preservado mesmo quando o enriquecimento falha. |
-| **Silver** | Não permitido | `transform_silver.py` filtra qualquer linha cujo enriquecimento do bronze tenha falhado (`nome_uf`, `nome_municipio`, `serie`, `rede` NULL) e aplica `COALESCE(..., 0)` nas colunas numéricas de distribuição (`proporcao_aluno_nivel_0..8`, `media_portugues`). `metas_consolidadas` exige que todas as colunas de meta (`meta_alfabetizacao_2024..2030`) estejam preenchidas antes de consolidar a linha. Os eventos de streaming, cujo payload é esparso por tipo de evento, são **despivotados para formato longo** (`streaming_eventos_clean`: uma linha por métrica preenchida), mantendo a camada 100% sem NULL sem inventar valores. |
-| **Gold** | Não permitido | As tabelas gold fazem `INNER JOIN` (em vez de `LEFT JOIN`) contra `silver.metas_consolidadas`. Estados/municípios sem meta completa na fonte (ex.: Acre não tem `meta_alfabetizacao_2024` em nenhum ano de `bronze.meta_uf`) são **excluídos**, em vez de gerar `meta_2030`/`gap_meta` NULL. Isso garante que a camada analítica esteja sempre pronta para dashboards e treinamento de modelos, sem exigir tratamento de nulos a jusante.
+| **Silver** | Não permitido em colunas-chave · **permitido, deliberado e reportado** em `proporcao_aluno_nivel_0..8`/`media_portugues` | `transform_silver.py` filtra qualquer linha cujo enriquecimento do bronze tenha falhado (`nome_uf`, `nome_municipio`, `serie`, `rede`, `taxa_alfabetizacao` NULL). As colunas de distribuição por nível de proficiência **não** são forçadas para 0 quando ausentes: ~48% dos municípios/UFs não têm esse detalhamento divulgado pelo INEP na fonte (sigilo estatístico para amostras pequenas), e fabricar `COALESCE(..., 0)` ali violaria a própria consistência da linha (9 colunas de proporção somando 0% junto de uma `taxa_alfabetizacao` real e diferente de zero). O NULL genuíno é preservado e **detectado explicitamente** por `quality/validate.py` (ver Detecção de valores ausentes), em vez de mascarado. `metas_consolidadas` exige que todas as colunas de meta (`meta_alfabetizacao_2024..2030`) estejam preenchidas antes de consolidar a linha. Os eventos de streaming, cujo payload é esparso por tipo de evento, são **despivotados para formato longo** (`streaming_eventos_clean`: uma linha por métrica preenchida), sem inventar valores. |
+| **Gold** | Não permitido em colunas-chave · herda o NULL deliberado de `proporcao_topo` quando a silver não tem distribuição | As tabelas gold fazem `INNER JOIN` (em vez de `LEFT JOIN`) contra `silver.metas_consolidadas`. Estados/municípios sem meta completa na fonte (ex.: Acre não tem `meta_alfabetizacao_2024` em nenhum ano de `bronze.meta_uf`) são **excluídos**, em vez de gerar `meta_2030`/`gap_meta` NULL. `perfil_desempenho_uf.proporcao_topo` fica NULL (não zero) quando a UF não tem distribuição por nível na silver — `AVG`/`SUM` em dashboards ignoram NULL nativamente, evitando que uma ausência de dado puxe a média para baixo como um zero fabricado faria.
 
 ### Verificação de duplicidade
 
@@ -228,10 +237,13 @@ As tabelas grandes (`alunos` com ~3,9M linhas e `alfabetizacao_municipio`, no br
 - `silver.alfabetizacao_uf_clean`/`alfabetizacao_municipio_clean`: taxa de alfabetização restrita a `[0, 100]`.
 - **Integridade referencial gold → silver**: toda `sigla_uf` de `gold.indicador_por_uf_ano` e todo `id_municipio` de `gold.painel_municipios` devem existir em `silver.metas_consolidadas`, e toda UF de `gold.ranking_estados` deve existir em `silver.alfabetizacao_uf_clean` — chaves órfãs reprovam a validação.
 - `gold.ranking_estados`: cobertura comparada contra `silver.metas_consolidadas` (não contra o total de UFs), já que o universo de estados elegíveis no gold é definido por quem tem meta completa, não por quem tem taxa de alfabetização.
+- **Consistência da distribuição por nível**: quando `proporcao_aluno_nivel_0..8` está preenchida, a soma das 9 colunas deve ficar em `[99, 101]` (tolerância de arredondamento) — garante que o dado da fonte é internamente coerente antes de ser usado em agregações.
 
 ### Detecção de valores ausentes
 
-`quality/validate.py --camada all` roda um check de NULL em colunas críticas nas 4 tabelas silver e nas 5 tabelas gold, retornando `exit 1` se qualquer NULL for encontrado — o mesmo mecanismo que interrompe o GitHub Actions em caso de falha (ver seção Monitoramento).
+`quality/validate.py --camada all` roda um check de NULL em colunas críticas nas 4 tabelas silver e nas 5 tabelas gold, retornando `exit 1` se qualquer NULL for encontrado nelas — o mesmo mecanismo que interrompe o GitHub Actions em caso de falha (ver seção Monitoramento).
+
+Para as colunas de distribuição por nível (`proporcao_aluno_nivel_0..8` na silver, `proporcao_topo` na gold), o NULL não é tratado como falha de pipeline: `validate.py` mede e **reporta** o percentual de linhas sem essa distribuição (hoje ~48%, por sigilo estatístico do INEP para municípios/UFs com amostra pequena) como uma métrica informativa, sem interromper o build. Tratar essa ausência estrutural como erro — ou pior, mascará-la com `COALESCE(..., 0)` — seria inconsistente com o próprio requisito de "detecção de valores ausentes": um zero fabricado não é detectável como ausência por ninguém a jusante.
 
 ---
 
@@ -257,8 +269,8 @@ As tabelas grandes (`alunos` com ~3,9M linhas e `alfabetizacao_municipio`, no br
 |---|---|---|
 | BigQuery Storage | < 1 GB (tabelas do INEP) | $0/mês (free tier: 10 GB) |
 | BigQuery Queries | < 50 MB/execução | $0/mês (free tier: 1 TB) |
-| Pub/Sub | < 1 MB/semana | $0/mês (free tier: 10 GB) |
-| GitHub Actions | < 30 min/semana | $0/mês (free tier: 2.000 min) |
+| Pub/Sub | < 1 MB/dia | $0/mês (free tier: 10 GB) |
+| GitHub Actions | < 30 min/dia (~900 min/mês) | $0/mês (free tier: 2.000 min) |
 | **Total estimado** | | **$0/mês** |
 
 ---

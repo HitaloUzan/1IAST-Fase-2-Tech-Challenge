@@ -1,9 +1,9 @@
-name: Pipeline Alfabetização — Bronze → Silver → Gold
+name: Pipeline Alfabetização — Bronze → Streaming → Silver → Gold
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * 1'
+    - cron: '0 6 * * *'
 
 jobs:
   pipeline:
@@ -27,6 +27,14 @@ jobs:
 
       - name: Bronze Ingestion
         run: python ingestion/batch/ingest_bronze.py
+
+      - name: Streaming Simulation
+        run: |
+          python streaming/consumer.py --max-mensagens 20 --timeout 60 &
+          CONSUMER_PID=$!
+          sleep 3
+          python streaming/producer.py --eventos 20 --intervalo 1.0
+          wait $CONSUMER_PID
 
       - name: Silver Transforms
         run: python silver/transform_silver.py

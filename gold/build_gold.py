@@ -118,9 +118,8 @@ GOLD_TABLES = {
             proporcao_abaixo_basico,
             proporcao_basico,
             proporcao_adequado_avancado,
-            COALESCE(proporcao_aluno_nivel_6, 0)
-            + COALESCE(proporcao_aluno_nivel_7, 0)
-            + COALESCE(proporcao_aluno_nivel_8, 0) AS proporcao_topo
+            proporcao_aluno_nivel_6 + proporcao_aluno_nivel_7 + proporcao_aluno_nivel_8
+                AS proporcao_topo
         FROM `{GCP_PROJECT_ID}.silver.alfabetizacao_uf_clean`
     """,
 
