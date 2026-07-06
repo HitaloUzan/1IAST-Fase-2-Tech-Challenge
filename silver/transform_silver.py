@@ -42,23 +42,23 @@ TRANSFORMS = {
             serie,
             rede,
             taxa_alfabetizacao,
-            COALESCE(media_portugues, 0) AS media_portugues,
-            COALESCE(proporcao_aluno_nivel_0, 0) AS proporcao_aluno_nivel_0,
-            COALESCE(proporcao_aluno_nivel_1, 0) AS proporcao_aluno_nivel_1,
-            COALESCE(proporcao_aluno_nivel_2, 0) AS proporcao_aluno_nivel_2,
-            COALESCE(proporcao_aluno_nivel_3, 0) AS proporcao_aluno_nivel_3,
-            COALESCE(proporcao_aluno_nivel_4, 0) AS proporcao_aluno_nivel_4,
-            COALESCE(proporcao_aluno_nivel_5, 0) AS proporcao_aluno_nivel_5,
-            COALESCE(proporcao_aluno_nivel_6, 0) AS proporcao_aluno_nivel_6,
-            COALESCE(proporcao_aluno_nivel_7, 0) AS proporcao_aluno_nivel_7,
-            COALESCE(proporcao_aluno_nivel_8, 0) AS proporcao_aluno_nivel_8,
-            COALESCE(proporcao_aluno_nivel_0, 0) + COALESCE(proporcao_aluno_nivel_1, 0)
+            media_portugues,
+            proporcao_aluno_nivel_0,
+            proporcao_aluno_nivel_1,
+            proporcao_aluno_nivel_2,
+            proporcao_aluno_nivel_3,
+            proporcao_aluno_nivel_4,
+            proporcao_aluno_nivel_5,
+            proporcao_aluno_nivel_6,
+            proporcao_aluno_nivel_7,
+            proporcao_aluno_nivel_8,
+            proporcao_aluno_nivel_0 + proporcao_aluno_nivel_1
                 AS proporcao_abaixo_basico,
-            COALESCE(proporcao_aluno_nivel_2, 0) + COALESCE(proporcao_aluno_nivel_3, 0)
+            proporcao_aluno_nivel_2 + proporcao_aluno_nivel_3
                 AS proporcao_basico,
-            COALESCE(proporcao_aluno_nivel_4, 0) + COALESCE(proporcao_aluno_nivel_5, 0)
-            + COALESCE(proporcao_aluno_nivel_6, 0) + COALESCE(proporcao_aluno_nivel_7, 0)
-            + COALESCE(proporcao_aluno_nivel_8, 0)
+            proporcao_aluno_nivel_4 + proporcao_aluno_nivel_5
+            + proporcao_aluno_nivel_6 + proporcao_aluno_nivel_7
+            + proporcao_aluno_nivel_8
                 AS proporcao_adequado_avancado,
             ingestao_ts,
             CURRENT_TIMESTAMP() AS silver_processado_ts
@@ -190,23 +190,23 @@ TRANSFORMS = {
             serie,
             rede,
             taxa_alfabetizacao,
-            COALESCE(media_portugues, 0) AS media_portugues,
-            COALESCE(proporcao_aluno_nivel_0, 0) AS proporcao_aluno_nivel_0,
-            COALESCE(proporcao_aluno_nivel_1, 0) AS proporcao_aluno_nivel_1,
-            COALESCE(proporcao_aluno_nivel_2, 0) AS proporcao_aluno_nivel_2,
-            COALESCE(proporcao_aluno_nivel_3, 0) AS proporcao_aluno_nivel_3,
-            COALESCE(proporcao_aluno_nivel_4, 0) AS proporcao_aluno_nivel_4,
-            COALESCE(proporcao_aluno_nivel_5, 0) AS proporcao_aluno_nivel_5,
-            COALESCE(proporcao_aluno_nivel_6, 0) AS proporcao_aluno_nivel_6,
-            COALESCE(proporcao_aluno_nivel_7, 0) AS proporcao_aluno_nivel_7,
-            COALESCE(proporcao_aluno_nivel_8, 0) AS proporcao_aluno_nivel_8,
-            COALESCE(proporcao_aluno_nivel_0, 0) + COALESCE(proporcao_aluno_nivel_1, 0)
+            media_portugues,
+            proporcao_aluno_nivel_0,
+            proporcao_aluno_nivel_1,
+            proporcao_aluno_nivel_2,
+            proporcao_aluno_nivel_3,
+            proporcao_aluno_nivel_4,
+            proporcao_aluno_nivel_5,
+            proporcao_aluno_nivel_6,
+            proporcao_aluno_nivel_7,
+            proporcao_aluno_nivel_8,
+            proporcao_aluno_nivel_0 + proporcao_aluno_nivel_1
                 AS proporcao_abaixo_basico,
-            COALESCE(proporcao_aluno_nivel_2, 0) + COALESCE(proporcao_aluno_nivel_3, 0)
+            proporcao_aluno_nivel_2 + proporcao_aluno_nivel_3
                 AS proporcao_basico,
-            COALESCE(proporcao_aluno_nivel_4, 0) + COALESCE(proporcao_aluno_nivel_5, 0)
-            + COALESCE(proporcao_aluno_nivel_6, 0) + COALESCE(proporcao_aluno_nivel_7, 0)
-            + COALESCE(proporcao_aluno_nivel_8, 0)
+            proporcao_aluno_nivel_4 + proporcao_aluno_nivel_5
+            + proporcao_aluno_nivel_6 + proporcao_aluno_nivel_7
+            + proporcao_aluno_nivel_8
                 AS proporcao_adequado_avancado,
             ingestao_ts,
             CURRENT_TIMESTAMP() AS silver_processado_ts

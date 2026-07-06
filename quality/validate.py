@@ -54,6 +54,13 @@ def check(condition: bool, msg: str, errors: list) -> None:
         errors.append(msg)
 
 
+def report(msg: str) -> None:
+    """Detecção de valores ausentes (spec): informativo, não falha o build —
+    usado para dados estruturalmente ausentes na fonte (ex.: sigilo estatístico
+    do INEP), que não devem ser mascarados nem tratados como erro de pipeline."""
+    log.info(f"  INFO  {msg}")
+
+
 def table_exists_and_has_rows(client: bigquery.Client, dataset: str, table: str) -> tuple[bool, int]:
     try:
         t = client.get_table(f"{GCP_PROJECT_ID}.{dataset}.{table}")
@@ -118,8 +125,7 @@ def validate_silver(client: bigquery.Client) -> list:
     silver_null_checks = {
         "alfabetizacao_uf_clean": """
             ano IS NULL OR sigla_uf IS NULL OR nome_uf IS NULL OR serie IS NULL
-            OR rede IS NULL OR taxa_alfabetizacao IS NULL OR media_portugues IS NULL
-            OR proporcao_aluno_nivel_0 IS NULL OR proporcao_aluno_nivel_8 IS NULL
+            OR rede IS NULL OR taxa_alfabetizacao IS NULL
         """,
         "metas_consolidadas": """
             ano IS NULL OR rede IS NULL OR taxa_alfabetizacao IS NULL
@@ -129,7 +135,6 @@ def validate_silver(client: bigquery.Client) -> list:
         "alfabetizacao_municipio_clean": """
             ano IS NULL OR id_municipio IS NULL OR nome_municipio IS NULL
             OR serie IS NULL OR rede IS NULL OR taxa_alfabetizacao IS NULL
-            OR media_portugues IS NULL
         """,
         "alunos_clean": """
             ano IS NULL OR id_municipio IS NULL OR nome_municipio IS NULL
@@ -145,6 +150,45 @@ def validate_silver(client: bigquery.Client) -> list:
                 SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.silver.{tbl}` WHERE {condition}
             """)
             check(nulls == 0, f"silver.{tbl} no nulls in critical cols (found {nulls})", errors)
+
+    # Detecção de valores ausentes (spec): a distribuição por nível de proficiência
+    # (proporcao_aluno_nivel_0..8) não é NULL por falha de pipeline — o INEP não
+    # divulga esse detalhamento para municípios/UFs com amostra pequena (sigilo
+    # estatístico). Preencher com 0 seria inconsistente com taxa_alfabetizacao
+    # (violaria "validação de consistência"), então mantemos NULL e apenas
+    # reportamos a cobertura, sem falhar o build.
+    distribution_tables = {
+        "alfabetizacao_uf_clean": "sigla_uf",
+        "alfabetizacao_municipio_clean": "id_municipio",
+    }
+    for tbl, key_col in distribution_tables.items():
+        exists, total = table_exists_and_has_rows(client, "silver", tbl)
+        if exists and total:
+            missing = query_scalar(client, f"""
+                SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.silver.{tbl}`
+                WHERE proporcao_aluno_nivel_0 IS NULL
+            """)
+            report(
+                f"silver.{tbl}: {missing:,}/{total:,} rows "
+                f"({missing / total:.0%}) sem distribuição por nível "
+                f"(sigilo estatístico do INEP na fonte, não é erro)"
+            )
+
+            inconsistent = query_scalar(client, f"""
+                SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.silver.{tbl}`
+                WHERE proporcao_aluno_nivel_0 IS NOT NULL
+                  AND ABS(
+                    (proporcao_aluno_nivel_0 + proporcao_aluno_nivel_1 + proporcao_aluno_nivel_2
+                   + proporcao_aluno_nivel_3 + proporcao_aluno_nivel_4 + proporcao_aluno_nivel_5
+                   + proporcao_aluno_nivel_6 + proporcao_aluno_nivel_7 + proporcao_aluno_nivel_8)
+                    - 100
+                  ) > 1
+            """)
+            check(
+                inconsistent == 0,
+                f"silver.{tbl} distribuição por nível soma ~100% quando presente (inconsistentes: {inconsistent})",
+                errors,
+            )
 
     exists, _ = table_exists_and_has_rows(client, "silver", "alfabetizacao_uf_clean")
     if exists:
@@ -219,7 +263,7 @@ def validate_gold(client: bigquery.Client) -> list:
         """,
         "perfil_desempenho_uf": """
             ano IS NULL OR sigla_uf IS NULL OR serie IS NULL OR rede IS NULL
-            OR taxa_alfabetizacao IS NULL OR proporcao_topo IS NULL
+            OR taxa_alfabetizacao IS NULL
         """,
         "painel_municipios": """
             id_municipio IS NULL OR nome_municipio IS NULL OR ano IS NULL
@@ -234,6 +278,20 @@ def validate_gold(client: bigquery.Client) -> list:
                 SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.gold.{tbl}` WHERE {condition}
             """)
             check(nulls == 0, f"gold.{tbl} no nulls in critical cols (found {nulls})", errors)
+
+    # Detecção de valores ausentes: proporcao_topo herda o NULL estrutural da
+    # silver (sigilo estatístico do INEP) — reportado, não tratado como falha.
+    exists, total = table_exists_and_has_rows(client, "gold", "perfil_desempenho_uf")
+    if exists and total:
+        missing = query_scalar(client, f"""
+            SELECT COUNT(*) FROM `{GCP_PROJECT_ID}.gold.perfil_desempenho_uf`
+            WHERE proporcao_topo IS NULL
+        """)
+        report(
+            f"gold.perfil_desempenho_uf: {missing:,}/{total:,} rows "
+            f"({missing / total:.0%}) sem proporcao_topo (herdado da ausência de "
+            f"distribuição por nível na silver, não é erro)"
+        )
 
     # Referential integrity: every gold key must resolve to a silver dimension.
     referential_deps = {
