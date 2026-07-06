@@ -2,6 +2,19 @@
 
 **Tech Challenge — Fase 2 | PosTech FIAP | IA Science**
 
+## Sumário
+
+- [Contexto do Problema](#contexto-do-problema)
+- [Arquitetura AS-IS](#diagrama-de-contexto-as-is)
+- [Arquitetura TO-BE](#diagrama-de-contexto-to-be)
+- [Tecnologias Utilizadas](#️-tecnologias-utilizadas--as-is-vs-to-be)
+- [Trade-offs](#️-decisões-arquiteturais-e-trade-offs)
+- [FinOps](#-finops)
+- [Qualidade de Dados](#-qualidade-de-dados--as-is-vs-to-be)
+- [Monitoramento](#-monitoramento--as-is-vs-to-be)
+- [Aplicação em IA](#-aplicação-em-ia)
+- [Como Executar](#como-executar-localmente-a-arquitetura-as-is)
+- [Estrutura do Repositório](#estrutura-do-repositório)
 ---
 
 ## Contexto do Problema
@@ -13,6 +26,41 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
 ---
 
 ## Arquitetura da Solução
+
+# Pipeline de Análise da Alfabetização no Brasil
+## Tech Challenge — Fase 2 · PosTech FIAP
+
+> **Nota arquitetural:** Este repositório contém duas visões da solução.
+> - **AS-IS (esta seção):** arquitetura implementada e entregue, rodando 100% no free tier do GCP.
+> - **TO-BE:** visão profissional de evolução, documentada na seção seguinte, representando
+>   como a pipeline seria construída em um ambiente corporativo real.
+
+---
+---
+## Diagrama de Contexto AS IS
+
+<img src="contexto_as_is.png" width="900">
+
+## Diagrama de Container AS IS
+
+<img src="Conatiner_as_is.png" width="900">
+
+## Diagrama de Contexto TO BE
+
+<img src="Contexto_to_be.png" width="900">
+
+## Diagrama de Container TO BE
+
+<img src="Container_to_be.png" width="900">
+
+
+## 📐 Arquitetura AS-IS (Implementada)
+
+A pipeline implementada usa **BigQuery como plataforma única** para todas as
+camadas (Bronze, Silver e Gold), com scripts Python orquestrados por GitHub
+Actions. A escolha priorizou simplicidade de implementação e custo zero
+dentro do free tier do GCP.
+
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -49,7 +97,6 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
     ║  silver.metas_consolidadas          ║
     ║  silver.alfabetizacao_municipio_clean║
     ║  silver.alunos_clean                ║
-    ║  silver.streaming_eventos_clean     ║
     ╚═══════════════╦═════════════════════╝
                     ║ build_gold.py
                     ║ agregação · ranking · JOIN metas
@@ -66,14 +113,6 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
             checks bronze · silver · gold
 ```
 
-### Fluxo de Dados
-
-1. **Ingestão batch** (`ingest_bronze.py`): 6 consultas ao dataset público `basedosdados.br_inep_avaliacao_alfabetizacao` no BigQuery, enriquecidas com os diretórios de UF/município e o dicionário de códigos, gravadas em `bronze.*` por *full refresh* — as tabelas grandes já nascem particionadas por `ano` e clusterizadas por chave de consulta. Os códigos crus da fonte são preservados ao lado das descrições decodificadas (`serie_codigo`/`serie`, `rede_codigo`/`rede`, etc.), mantendo o bronze fiel ao raw data: o enriquecimento é aditivo, nunca substitui o dado original.
-2. **Ingestão streaming** (`producer.py` → Pub/Sub → `consumer.py`): eventos simulados de medição de desempenho, atualização de meta e revisão de indicador são publicados no tópico `alfabetizacao-streaming`; o consumidor cria a infraestrutura (tópico, subscription e tabela) se não existir, consome as mensagens e as grava em `bronze.streaming_eventos`. Roda automaticamente a cada execução do pipeline — sem intervenção manual — logo após a ingestão batch (ver `run_pipeline.py` e `.github/workflows/pipeline.yml`).
-3. **Transformação silver** (`transform_silver.py`): deduplicação por chave via `ROW_NUMBER()`, filtro de linhas com enriquecimento incompleto, normalização de tipos e chaves, consolidação das 3 tabelas de metas em `silver.metas_consolidadas` e normalização dos eventos de streaming para formato longo (uma linha por métrica, sem NULL).
-4. **Camada gold** (`build_gold.py`): agregações por UF/ano, ranking de estados, evolução temporal, perfil de desempenho por níveis e painel municipal — todas com `INNER JOIN` contra as metas, prontas para dashboard e ML.
-5. **Qualidade** (`validate.py`): checks de existência/volume, duplicidade, domínio (UFs válidas, taxa em [0,100]), NULLs em colunas críticas e integridade referencial entre gold e silver; `exit 1` interrompe o CI em caso de falha.
-
 ---
 
 ## Fontes de Dados
@@ -89,24 +128,250 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
 
 ---
 
-## Tecnologias Utilizadas
+---
 
-| Componente | Tecnologia | Justificativa |
-|---|---|---|
-| Cloud | **GCP** | Free tier generoso; BigQuery e Pub/Sub nativos e integrados |
-| Data Warehouse | **BigQuery** | SQL serverless, 1 TB/mês grátis, sem VMs para gerenciar |
-| Streaming | **Google Pub/Sub** | Integração nativa com BigQuery; 10 GB/mês no free tier |
-| Linguagem | **Python 3.11** | Bibliotecas maduras para GCP; padrão na engenharia de dados |
-| CI/CD | **GitHub Actions** | Orquestração gratuita com autenticação via service account (secret `GCP_SA_KEY`); Workload Identity Federation é evolução prevista (ver AS-IS → TO-BE) |
-| Qualidade | **Validações nativas BigQuery** | Sem dependência de frameworks externos |
+## 🛠️ Tecnologias Utilizadas — AS-IS vs TO-BE
+
+| Componente | AS-IS (Implementado) | Justificativa AS-IS | TO-BE (Visão Profissional) | Justificativa TO-BE |
+|---|---|---|---|---|
+| **Cloud** | **GCP** | Free tier generoso; BigQuery nativo e integrado; $0/mês viável | **GCP** | Ecossistema nativo; BigQuery, Dataflow, Pub/Sub e Cloud Composer integrados |
+| **Orquestração** | **GitHub Actions** | Gratuito para repositórios públicos; cron semanal; autenticação via `GCP_SA_KEY`; sequência ingest → transform → build → validate em um único workflow | **Apache Airflow (Cloud Composer)** | DAGs com dependências complexas; retry automático por tarefa; visibilidade de falhas por etapa; padrão de mercado para pipelines de dados em produção |
+| **Autenticação** | **Service account + GCP_SA_KEY** | Secret armazenado no repositório; roles mínimas: BigQuery Data Editor · Job User · Pub/Sub Editor — princípio do menor privilégio | **Workload Identity Federation** | Elimina chaves de serviço armazenadas como secret; tokens OIDC com escopo mínimo por job; sem risco de vazamento de credencial |
+| **Ingestão batch** | **ingest_bronze.py (Python 3.11 + BigQuery client)** | 6 consultas federadas contra a Base dos Dados pública; WRITE_TRUNCATE garante idempotência; sem dependência de Dataflow ou Spark | **Dataflow (Apache Beam)** | Serverless; mesmo código roda em modo batch e streaming, eliminando duplicação de lógica; escala automaticamente conforme volume |
+| **Ingestão streaming** | **producer.py + consumer.py (Pub/Sub)** | Simula eventos em tempo real; auto-provisiona tópico e subscription; grava via load job em micro-lote — gratuito, sem insertAll pago | **Pub/Sub + Dataflow Streaming** | Pub/Sub entrega eventos garantidos e ordenados; Dataflow consome sem servidor dedicado; 10 GB/mês no free tier |
+| **Armazenamento Bronze/Silver** | **BigQuery dataset bronze/silver** | BigQuery puro elimina camadas intermediárias; free tier cobre o volume atual; partição e clustering reduzem custo de query | **Google Cloud Storage (GCS)** | Armazenamento de objetos mais barato; Lifecycle move histórico para Nearline ($0,01/GB) e Coldline ($0,004/GB) automaticamente |
+| **Formato tabular** | **BigQuery nativo (colunar)** | Sem custo de conversão; compressão e particionamento nativos; adequado para o volume atual (~3,9M linhas) | **Apache Iceberg sobre GCS** | Transações ACID e time travel ilimitado sobre Parquet; formato aberto compatível com qualquer engine (Spark, Athena, BigQuery) |
+| **Transformação** | **transform_silver.py (Python 3.11)** | Script Python com BigQuery client; dedup via ROW_NUMBER; normalização e integração de bases; sem custo de processamento externo | **Dataflow (Apache Beam)** | Processa em paralelo sem gerenciar cluster; escala automaticamente; reusa o mesmo runtime da ingestão batch |
+| **Qualidade de dados** | **quality/validate.py** | 35+ checks nativos em Python + BigQuery; exit 1 reprova o workflow automaticamente; código auditável no repositório | **BigQuery SQL Assertions** | Validações nativas via SQL; sem dependência de frameworks externos; integradas ao engine dos dados; auditáveis via `INFORMATION_SCHEMA` |
+| **Catálogo de dados** | **Logging Python + comentários no código** | Metadados documentados via logging estruturado e comentários nos scripts; sem custo adicional | **BigQuery Labels + Descriptions** | Metadados documentados direto nas tabelas via `ALTER TABLE SET OPTIONS`; pesquisáveis nativamente; sem custo adicional |
+| **Controle de acesso** | **Cloud IAM (service account única)** | Roles mínimas por princípio do menor privilégio; sem chaves expostas no código | **Cloud IAM (service accounts por serviço)** | Service account isolada por serviço (Dataflow, Composer, Cloud Run); permissão mínima por componente; Workload Identity Federation elimina chaves |
+| **Data Warehouse** | **BigQuery (Bronze + Silver + Gold)** | BigQuery como plataforma única; free tier cobre storage e queries no volume atual; partição e clustering reduzem bytes escaneados | **BigQuery (Gold)** | SQL serverless; 1 TB/mês grátis; tabelas particionadas por data e clusterizadas por UF e município na Gold |
+| **Query ad hoc** | **BigQuery on-demand** | SELECT explícito em todas as queries; nunca `SELECT *`; 1 TB/mês grátis | **BigQuery (serverless)** | Cobra por dado escaneado, não por cluster ativo; clustering e particionamento reduzem custo por query |
+| **BI / Dashboard** | **Não implementado** | Fora do escopo entregue — evolução futura (TO-BE) | **Looker Studio** | Gratuito; conecta nativamente ao BigQuery sem ETL adicional; acessível a gestores sem conhecimento técnico |
+| **Machine Learning** | **Não implementado** | Fora do escopo entregue — evolução futura (TO-BE) | **Vertex AI** | Lê direto do BigQuery sem exportar dados; unifica treino, deploy e monitoramento de modelos na mesma plataforma |
+| **IA Generativa** | **Não implementado** | Fora do escopo entregue — evolução futura (TO-BE) | **Vertex AI Gemini** | Mesma plataforma do Vertex AI; acessa dados da Gold com a mesma governança e controle de acesso já configurados |
+| **Segurança de API externa** | **Não implementado** | Fora do escopo entregue — evolução futura (TO-BE) | **API Gateway (Apigee) + JWT** | Única porta de entrada para sistemas externos; valida token antes de qualquer requisição chegar ao Cloud Run; aplica rate limiting sem alterar o backend |
+| **Backend de API** | **Não implementado** | Fora do escopo entregue — evolução futura (TO-BE) | **Cloud Run** | Serverless; escala a zero quando sem requisições, zerando custo em períodos ociosos; recebe apenas requisições já validadas pelo Gateway |
+| **Monitoramento** | **logging Python + GitHub Actions** | Logging estruturado com linhas, tempos e erros por etapa; falha no `validate.py` reprova o workflow e envia e-mail automático do CI | **Cloud Monitoring + Cloud Logging** | Nativo do GCP; coleta métricas de todos os serviços sem instalar agentes; alertas configuráveis para falhas, latência e volume processado |
+| **FinOps** | **BigQuery free tier** | Storage colunar nativo; partição e clustering reduzem bytes escaneados; SELECT explícito; load jobs gratuitos; $0/mês | **Cloud Billing + Budget Alerts** | Alertas em 50%, 80% e 100% do orçamento; visibilidade de custo por serviço e por camada; sem ferramenta adicional |
+| **Cold storage** | **Não aplicável** | BigQuery gerencia ciclo de vida internamente; time travel de 7 dias no free tier | **GCS Nearline / Coldline** | Transição automática via Lifecycle Policy; histórico antigo custa até 80% menos que Standard |
+| **Linguagem** | **Python 3.11** | Bibliotecas maduras para GCP (google-cloud-bigquery, google-cloud-pubsub); padrão na engenharia de dados | **Python 3.11** | Bibliotecas maduras para GCP (google-cloud-bigquery, apache-beam, google-cloud-storage); padrão na engenharia de dados |
+
+> **Nota sobre orquestração:** o TO-BE substitui o GitHub Actions por **Apache Airflow via Cloud Composer** para orquestração da pipeline de dados. O GitHub Actions permanece no TO-BE apenas para **CI/CD** (testes, lint, deploy de código) — separando claramente a responsabilidade de orquestração de dados (Airflow) da entrega contínua de código (GitHub Actions). Essa separação é o padrão em engenharia de dados corporativa: o Airflow gerencia dependências entre tarefas de dados com retry granular, backfill histórico e visibilidade de DAGs; o GitHub Actions garante que o código que chega ao Airflow passou por validação automática.
 
 ---
 
-## Como Executar Localmente
+## ⚖️ Decisões Arquiteturais e Trade-offs 
+
+### Batch vs Streaming
+
+| | Batch | Streaming |
+|---|---|---|
+| **Quando** | Metas anuais · histórico | Novos indicadores · alertas urgentes · medições de desempenho |
+| **Custo AS-IS** | Grátis — load jobs no free tier | Grátis — micro-lote via load job (sem insertAll pago) |
+| **Custo TO-BE** | Baixo — Dataflow jobs sob demanda | Maior — Pub/Sub + Dataflow always-on |
+| **Latência AS-IS** | Semanal (segunda 6h UTC) | Minutos — micro-lote Pub/Sub |
+| **Latência TO-BE** | Horas / dias | Segundos |
+| **Implementação AS-IS** | `ingest_bronze.py` · GitHub Actions cron | `producer.py` + `consumer.py` · Pub/Sub simulado |
+| **Implementação TO-BE** | GitHub Actions cron + Dataflow Apache Beam | Pub/Sub + Dataflow Streaming always-on |
+| **Idempotência** | `WRITE_TRUNCATE` garante reexecução segura | Load job em micro-lote evita duplicação |
+| **Escalabilidade** | Adequada para volume atual (~3,9M linhas) | Ilimitada — Dataflow escala automaticamente |
+
+**Decisão AS-IS:** pipeline híbrida com custo zero. Batch via script Python para o volume histórico; streaming simulado via Pub/Sub + consumer.py para demonstrar capacidade de ingestão de eventos em tempo real sem ultrapassar o free tier.
+
+**Decisão TO-BE:** mesma lógica híbrida, com infraestrutura gerenciada. Batch para 90% do volume (dados históricos e metas periódicas); streaming real via Pub/Sub + Dataflow always-on apenas para eventos onde latência importa — evitando pagar por infraestrutura contínua para dados que chegam com baixa frequência.
+
+
+
+---
+
+### BigQuery puro vs Lakehouse (GCS + BigQuery)
+
+| | AS-IS (BigQuery puro) | TO-BE (GCS + BigQuery) |
+|---|---|---|
+| **Complexidade** | Baixa — um serviço | Alta — dois serviços + Iceberg |
+| **Custo** | $0/mês (free tier) | ~$3/mês |
+| **Schema** | Rígido desde a Bronze | Flexível na Bronze/Silver |
+| **Time travel** | 7 dias (BQ padrão) | Ilimitado (Iceberg) |
+| **Reprocessamento** | Paga por query na Bronze | Lê GCS sem custo de query |
+| **Lock-in** | Total no BigQuery | Formato aberto (Parquet) |
+| **Ideal para** | Projeto acadêmico · equipe pequena | Produção · múltiplos engines |
+
+**Decisão AS-IS:** BigQuery puro elimina camadas intermediárias e mantém custo zero. A mesma lógica de Bronze → Silver → Gold é preservada, apenas dentro do BigQuery em vez de GCS + BigQuery.
+
+---
+
+### Custo vs Performance
+
+| Decisão | AS-IS (Implementado) | TO-BE (Visão Profissional) | Impacto |
+|---|---|---|---|
+| **Formato de arquivo** | BigQuery colunar nativo | Parquet sobre GCS | AS-IS: sem custo de conversão · TO-BE: reduz I/O e armazenamento em até 80% vs CSV |
+| **Particionamento** | Por ano na Bronze | Por UF e ano no GCS + Gold | Queries leem só o período/região necessária em ambos |
+| **Clusterização** | Por `id_municipio` e `serie` | Por município na Gold | Reduz bytes escaneados em queries analíticas em ambos |
+| **Storage histórico** | BigQuery free tier (10 GB grátis) | GCS Nearline ($0,01/GB) → Coldline ($0,004/GB) | AS-IS: grátis até 10 GB · TO-BE: até 80% mais barato que Standard para dados frios |
+| **Processamento** | `ingest_bronze.py` + `transform_silver.py` Python | Dataflow serverless (Apache Beam) | AS-IS: sem custo · TO-BE: paga só pelo tempo de execução, sem cluster ocioso |
+| **Orquestração** | GitHub Actions gratuito | GitHub Actions gratuito | Zero custo fixo em ambos vs Cloud Composer (~$300/mês) |
+| **Consultas analíticas** | BigQuery on-demand (1 TB/mês grátis) | BigQuery on-demand | AS-IS: grátis no free tier · TO-BE: paga por dado escaneado, não por cluster ligado |
+| **Ingestão streaming** | Load job micro-lote (gratuito) | Pub/Sub + Dataflow always-on | AS-IS: $0 · TO-BE: custo contínuo justificado por latência real de segundos |
+| **API externa** | Não implementada | Cloud Run + API Gateway | TO-BE: Cloud Run escala a zero — custo zero em períodos ociosos |
+| **Qualidade de dados** | `validate.py` Python (gratuito) | SQL assertions nativas BigQuery (gratuito) | Ambos sem custo adicional · TO-BE mais integrado ao ecossistema |
+| **Custo total estimado** | **$0/mês** | **~$3–5/mês** | AS-IS ideal para projeto acadêmico · TO-BE justificado em produção corporativa |
+
+**Decisão AS-IS: free tier primeiro, performance suficiente.** Para ~3,9M linhas de dados educacionais públicos, o BigQuery free tier entrega performance adequada com custo zero. `WRITE_TRUNCATE` garante idempotência sem acúmulo; `SELECT` explícito e clustering evitam escaneamento desnecessário.
+
+**Decisão TO-BE: custo primeiro, performance onde importa.** GCS Nearline/Coldline para histórico frio; Dataflow serverless só executa quando necessário; particionamento e clusterização apenas na Gold, onde as queries analíticas exigem velocidade. GitHub Actions mantém orquestração gratuita em ambas as visões.
+
+---
+
+## 💰 FinOps
+
+### Estimativa de Custo Mensal
+
+| Serviço | AS-IS (Implementado) | TO-BE (Visão Profissional) |
+|---|---|---|
+| **Google Cloud Storage (Standard)** | Não utilizado — BigQuery puro | ~$0,20 (10 GB Bronze ativo) |
+| **Google Cloud Storage (Nearline)** | Não utilizado | ~$0,50 (50 GB histórico recente) |
+| **Google Cloud Storage (Coldline)** | Não utilizado | ~$0,80 (200 GB histórico antigo) |
+| **BigQuery (armazenamento)** | Grátis — ~5 GB no free tier (10 GB/mês) | ~$0,10 (5 GB Gold) |
+| **BigQuery (queries)** | Grátis — ~50 GB escaneados no free tier (1 TB/mês) | ~$0,25 (1 TB grátis — mesmo consumo) |
+| **BigQuery (load jobs)** | Grátis — ingestão batch e micro-lote streaming | Não utilizado — substituído pelo Dataflow |
+| **Dataflow** | Não utilizado — scripts Python locais | ~$1,50 (10h de processamento batch/mês) |
+| **Pub/Sub** | Grátis — ~5 GB/mês no free tier (10 GB/mês) | Grátis — mesmo consumo no free tier |
+| **Cloud Run** | Não implementado | Grátis (1M requisições/mês no free tier) |
+| **API Gateway (Apigee)** | Não implementado | Grátis até 2M chamadas/mês |
+| **GitHub Actions** | Grátis — repositório público | Grátis — repositório público |
+| **Cloud Monitoring** | Não utilizado — logging Python | Grátis (métricas básicas) |
+| **Cloud Billing + Budget Alerts** | Não configurado formalmente | Grátis |
+| **Total estimado** | **$0/mês** | **~$3,35/mês** |
+
+> **AS-IS:** custo zero sustentado pelo free tier do GCP. Viável para o volume atual de dados educacionais públicos (~3,9M linhas de alunos). O BigQuery absorve armazenamento e queries dentro dos limites gratuitos.
+>
+> **TO-BE:** ~$3,35/mês considerando o free tier do GCP e volume típico de dados educacionais. Em produção com maior volume, o particionamento, o Coldline e o Dataflow sob demanda garantem escala sem crescimento linear de custo.
+
+---
+
+### Práticas adotadas
+
+| Prática | AS-IS | TO-BE |
+|---|---|---|
+| **Formato de armazenamento** | BigQuery colunar nativo — evita custo de conversão | Parquet em todas as camadas — reduz I/O e armazenamento em até 80% vs CSV |
+| **Ciclo de vida de dados** | BigQuery gerencia internamente (time travel 7 dias) | Lifecycle Policy no GCS move dados para Nearline (30d) e Coldline (90d) automaticamente |
+| **Particionamento** | Por ano na Bronze · por id_municipio/serie na Silver | Por UF e ano no GCS · por data e município na Gold |
+| **Clusterização** | Por id_municipio e serie nas tabelas grandes | Por município na Gold — queries leem só o subconjunto necessário |
+| **Processamento** | Scripts Python locais — custo zero | Dataflow sob demanda — jobs existem só durante execução, sem cluster ocioso |
+| **Queries** | SELECT explícito em todas as queries — nunca `SELECT *` | SELECT explícito + partição/clustering — custo mínimo por query |
+| **Streaming** | Load job em micro-lote — evita insertAll pago | Pub/Sub + Dataflow — custo dentro do free tier (10 GB/mês) |
+| **API externa** | Não implementada | Cloud Run escala a zero — custo zero em períodos sem requisições |
+| **Orquestração** | GitHub Actions gratuito | Cloud Composer (Apache Airflow) ~$300/mês | AS-IS: zero custo fixo de orquestração · TO-BE: custo justificado por DAGs com dependências complexas, retry granular por tarefa e backfill histórico — padrão corporativo para pipelines de dados em produção |
+| **Alertas de custo** | Não configurado | Budget Alerts em 50%, 80% e 100% do orçamento mensal |
+| **Idempotência** | WRITE_TRUNCATE — evita reprocessamentos e duplicações custosas | WRITE_TRUNCATE + Iceberg ACID — garante consistência sem reprocessamento total |
+
+---
+
+## ✅ Qualidade de Dados — AS-IS vs TO-BE
+
+| Categoria | O que valida | AS-IS (Implementado) | Ferramenta AS-IS | TO-BE (Visão Profissional) | Ferramenta TO-BE |
+|---|---|---|---|---|---|
+| **Duplicidade** | ROW_NUMBER por chave em Bronze e Silver | Bloqueia execução se duplicatas encontradas · exit 1 | `validate.py` | SQL assertion com ROW_NUMBER antes de materializar tabela | BigQuery SQL Assertions |
+| **NULLs críticos** | `co_municipio` · `co_uf` · `indicador` · `ano` em todas as camadas | 35+ checks · exit 1 se NULL em coluna crítica | `validate.py` | `NOT NULL` constraints + assertion por coluna · alerta no CI | BigQuery SQL Assertions |
+| **Domínio** | 27 UFs válidas · taxa entre 0 e 100 · anos dentro do range esperado | Verifica domínio em Python · reprova workflow se valor fora do range | `validate.py` | Assertion com `COUNTIF` sobre valores fora do domínio esperado | BigQuery SQL Assertions |
+| **Integridade referencial** | Municípios da Gold existem na Silver · metas têm correspondência | Conta órfãos via JOIN · exit 1 se > 0 registros sem correspondência | `validate.py` | Assertion com LEFT JOIN + `IS NULL` · falha bloqueia build_gold | BigQuery SQL Assertions |
+| **Consistência** | `streaming_eventos_clean` sem duplicata por evento + métrica | Verifica duplicata na tabela de streaming após ingestão | `validate.py` | Assertion pós-ingestão via Pub/Sub · alerta em dead-letter queue | BigQuery + Cloud Monitoring |
+| **Enriquecimento** | Registros com dicionário ou diretório incompleto filtrados | Filtro de enriquecimento incompleto no `transform_silver.py` | `transform_silver.py` | Filtro mantido no Dataflow (Apache Beam) · log de registros descartados | Dataflow + Cloud Logging |
+| **Idempotência** | Reexecução não duplica dados | `WRITE_TRUNCATE` em toda ingestão batch | `ingest_bronze.py` | `WRITE_TRUNCATE` + Iceberg ACID · transações garantem consistência | Dataflow + Apache Iceberg |
+| **Alerta em falha** | Impede dados inválidos de chegar à Gold | `exit 1` reprova o workflow · GitHub envia e-mail automático | GitHub Actions CI/CD | SQL assertion retorna erro · bloqueia query · alerta no CI/CD | BigQuery + GitHub Actions |
+| **Cobertura total de checks** | Checks executados a cada run | **35+ checks** em Python cobrindo Bronze, Silver e Gold | `quality/validate.py` | SQL assertions nativas · sem framework externo · integradas ao pipeline | BigQuery SQL Assertions |
+
+> **AS-IS:** qualidade centralizada no `quality/validate.py`, executado como última etapa do workflow. Exit 1 garante que qualquer falha interrompe o pipeline e gera alerta via GitHub CI/CD. Simples, gratuito e auditável — o código de validação fica no próprio repositório junto ao pipeline.
+>
+> **TO-BE:** SQL assertions nativas no BigQuery eliminam dependência de script externo. As validações ficam acopladas às tabelas, executam no mesmo engine dos dados e são auditáveis via `INFORMATION_SCHEMA`. Mesma lógica de bloqueio do AS-IS — falha na assertion impede materialização da camada seguinte.
+
+---
+
+## 🤖 Aplicação em IA
+
+A camada Gold foi projetada para ser consumida diretamente pelo Vertex AI, sem
+necessidade de exportação de dados. Isso elimina o risco de divergência entre
+o dataset de treino e os dados em produção.
+
+O principal caso de uso é a **predição de risco municipal**: combinando a série
+histórica do `indicador_por_uf_ano` com o `painel_municipios`, é possível treinar
+um modelo que identifica quais municípios têm baixa probabilidade de atingir a
+meta de 2030 — transformando o indicador de uma métrica descritiva em uma
+ferramenta preditiva para orientar políticas públicas.
+
+A tabela `painel_municipios` enriquecida com dados do IBGE e FUNDEB também
+viabiliza **clustering de vulnerabilidade educacional**, segmentando os municípios
+em perfis homogêneos para subsidiar intervenções diferenciadas por região.
+
+Por fim, o **Vertex AI Gemini** pode gerar resumos executivos automáticos a
+partir dos resultados da Gold — traduzindo os dados em linguagem natural para
+gestores sem formação técnica.
+
+> Todos os casos de uso abaixo são evolução futura (TO-BE) — não implementados neste projeto.
+
+| Caso de uso | Dado de entrada (Gold) | Saída esperada |
+|---|---|---|
+| **Predição de risco municipal** | `evolucao_temporal_brasil` + `perfil_desempenho_uf` | Municípios com risco de não atingir meta 2030 |
+| **Projeção meta 2030 por UF** | `indicador_por_uf_ano` (série temporal) | Projeção por UF com intervalo de confiança |
+| **Clustering de vulnerabilidade** | `painel_municipios` + dados IBGE/FUNDEB | Segmentos de municípios por perfil educacional |
+| **Predição municipal com features externas** | `painel_municipios` + Censo Escolar + FUNDEB | Score de risco por município |
+| **Relatórios executivos automáticos** | Todas as tabelas Gold | Resumos em linguagem natural para gestores |
+| **Detecção de anomalias** | `evolucao_temporal_brasil` | Municípios com queda abrupta no indicador |
+
+---
+
+## 📊 Monitoramento — AS-IS vs TO-BE
+
+| O que monitorar | AS-IS (Implementado) | Ferramenta AS-IS | TO-BE (Visão Profissional) | Ferramenta TO-BE |
+|---|---|---|---|---|
+| **Falha em workflow** | `validate.py` exit 1 reprova o workflow · GitHub envia e-mail automático de falha | GitHub Actions CI/CD | Notificação imediata por e-mail em qualquer falha de job | Cloud Monitoring + GitHub |
+| **Qualidade de dados** | 35+ checks em Python · duplicidade · NULLs críticos · domínio · integridade referencial · exit 1 em falha | `quality/validate.py` | Alerta se regras de qualidade reprovam > 1% dos registros | BigQuery SQL Assertions (nativas) |
+| **Tempo de execução** | Logging Python por etapa · linhas · tempos · erros registrados no console do Actions | logging Python | Alerta se job Dataflow excede 30 min | Cloud Monitoring |
+| **Volume ingerido** | Contagem de linhas por tabela registrada no log estruturado | logging Python | Alerta se volume ingerido < 80% do esperado | Cloud Logging |
+| **Falha de entrega no Pub/Sub** | Não monitorado formalmente · falha visível no log do `consumer.py` | logging Python | Alerta em dead-letter queue | Cloud Monitoring |
+| **Custo mensal** | Não configurado formalmente · custo zero no free tier dispensa alerta | — | Alertas em 50%, 80% e 100% do budget mensal | Cloud Billing + Budget Alerts |
+| **Latência de ingestão** | Tempo total logado por etapa no workflow | logging Python | Alerta se latência de job Dataflow > 30 min | Cloud Monitoring |
+| **Dados inválidos contaminando downstream** | `exit 1` impede execução das etapas seguintes se validate falha | `quality/validate.py` | SQL assertions bloqueiam query na Silver/Gold se dados inválidos | BigQuery SQL Assertions |
+
+> **AS-IS:** monitoramento centralizado no GitHub Actions e logging Python. Simples, gratuito e suficiente para o volume e frequência do projeto. A combinação de `validate.py` com exit 1 garante que nenhum dado inválido chega à Gold sem alerta.
+>
+> **TO-BE:** observabilidade nativa do GCP com alertas proativos, métricas de latência, volume e custo. Cloud Monitoring coleta métricas de todos os serviços sem agentes adicionais; Cloud Billing protege contra gastos inesperados com alertas em três níveis.
+
+---
+
+## O que muda do AS-IS para o TO-BE
+
+| Dimensão | AS-IS (Implementado) | TO-BE (Visão Profissional) |
+|---|---|---|
+| **Armazenamento** | BigQuery puro | GCS (Bronze/Silver) + BigQuery (Gold) |
+| **Formato** | BigQuery nativo | Apache Iceberg sobre GCS |
+| **Autenticação** | `GCP_SA_KEY` como secret | Workload Identity Federation (sem chave) |
+| **Qualidade** | `validate.py` em Python | SQL assertions nativas no BigQuery |
+| **Governança** | Logging Python + comentários no código | BigQuery Labels + Descriptions — metadados documentados direto nas tabelas via `ALTER TABLE SET OPTIONS`; sem custo adicional |
+| **Streaming** | `producer.py` simulado | Pub/Sub + Dataflow always-on |
+| **Transformação** | `transform_silver.py` Python | Dataflow (Apache Beam) serverless |
+| **API externa** | Não implementada | API Gateway (Apigee) + JWT + Cloud Run |
+| **BI** | Não implementado | Looker Studio |
+| **ML** | Não implementado | Vertex AI + Vertex AI Gemini |
+| **Custo** | $0/mês (free tier) | ~$3–5/mês (estimado) |
+| **Escalabilidade** | Adequada para dados educacionais públicos | Petabytes · múltiplos engines |
+
+## Por que o TO-BE não foi implementado
+
+- **Workload Identity Federation** exige configuração de pool no IAM que ultrapassa o escopo do free tier
+- **Dataflow** tem custo por hora de worker — inviável para projeto acadêmico
+- **GCS + Iceberg** adiciona complexidade de configuração sem benefício prático no volume atual (~3,9M linhas)
+- **API Gateway (Apigee)** é um serviço pago sem free tier significativo
+- O free tier do BigQuery é suficiente para o volume e a frequência de acesso deste projeto
+
+---
+
+## Como Executar Localmente a Arquitetura AS IS
 
 ### Pré-requisitos
 
-1. Conta GCP com projeto `pipeline-alfabetizacao`
+1. Conta GCP com projeto `project-516b6700-5d68-403c-860`
 2. APIs habilitadas: BigQuery API, Pub/Sub API
 3. Service Account com roles:
    - `BigQuery Data Editor`
@@ -146,15 +411,7 @@ python quality/validate.py --camada silver
 python quality/validate.py --camada gold
 ```
 
-### Streaming
-
-`python run_pipeline.py` já orquestra o streaming automaticamente: sobe o consumidor em
-background, aguarda a subscription conectar, dispara o produtor e espera o consumidor
-finalizar antes de seguir para a camada silver — sem necessidade de terminais separados
-ou intervenção manual. Use `--skip-streaming` para pular essa etapa.
-
-Para rodar o streaming isoladamente (debug), ainda é possível disparar os dois scripts
-à mão em terminais separados:
+### Streaming (2 terminais separados)
 
 ```bash
 # Terminal 1 — consumidor (deve estar rodando antes do produtor)
@@ -164,17 +421,11 @@ python streaming/consumer.py --max-mensagens 20 --timeout 60
 python streaming/producer.py --eventos 20 --intervalo 1.0
 ```
 
-O consumidor e o produtor criam automaticamente o tópico, a subscription e a tabela
-`bronze.streaming_eventos` na primeira execução — para isso a service account precisa
-da role `Pub/Sub Editor` (que inclui `pubsub.topics.create`). Após consumir eventos,
-rode `python silver/transform_silver.py` para materializar `silver.streaming_eventos_clean`
-(isso já é feito automaticamente pelo `run_pipeline.py` e pelo GitHub Actions).
-
 ---
 
 ## GitHub Actions — Configuração
 
-O workflow `.github/workflows/pipeline.yml` executa o pipeline completo — batch, streaming, silver, gold e qualidade — automaticamente todo dia às 6h UTC e pode ser disparado manualmente.
+O workflow `.github/workflows/pipeline.yml` executa o pipeline completo automaticamente toda segunda-feira às 6h UTC e pode ser disparado manualmente.
 
 ### Criando o secret `GCP_SA_KEY`
 
@@ -193,103 +444,7 @@ roles/pubsub.editor
 
 ---
 
-## Decisões Arquiteturais
-
-### Batch vs Streaming
-
-O volume de dados do INEP é atualizado anualmente, tornando **batch** a abordagem principal. O componente **streaming via Pub/Sub** simula a ingestão de atualizações em tempo quase real (novas medições, revisões de metas), preparando a arquitetura para quando o INEP publicar dados em fluxo contínuo.
-
-### Data Lake vs Data Warehouse
-
-Optamos por **BigQuery como único destino** (sem Cloud Storage separado), eliminando camadas intermediárias de armazenamento e reduzindo custo. O BigQuery opera como data lake para bronze (schema-on-write flexível) e data warehouse para gold (tabelas analíticas tipadas).
-
-### WRITE_TRUNCATE vs Append
-
-Todas as tabelas usam `WRITE_TRUNCATE` para garantir idempotência: reexecuções não acumulam duplicatas e o custo de armazenamento permanece estável. O histórico completo é mantido pelo campo `ingestao_ts`.
-
-### Custo vs Performance
-
-Queries usam `SELECT` explícito (sem `SELECT *`) para minimizar bytes escaneados. Os datasets bronze/silver/gold ficam no mesmo projeto GCP, eliminando cobranças de transferência entre projetos.
-
-### Particionamento e Clustering
-
-As tabelas grandes (`alunos` com ~3,9M linhas e `alfabetizacao_municipio`, no bronze e no silver) são **particionadas por `ano`** (range partitioning) e **clusterizadas** pelas chaves mais filtradas (`id_municipio`, `serie`); `metas_consolidadas` é clusterizada por `escopo`, usado como filtro em todas as queries gold. Tabelas pequenas (UF, metas nacionais, gold agregadas) ficam sem partição de propósito: particionar tabelas de poucos KB adiciona overhead de metadados sem nenhum ganho de *pruning* — uma decisão FinOps documentada, não um esquecimento.
-
 ---
-
-## Governança e Qualidade de Dados
-
-### Política de valores ausentes por camada
-
-| Camada | Tolerância a NULL | Justificativa |
-|---|---|---|
-| **Bronze** | Permitido | Raw layer — preserva os dados exatamente como vieram da fonte, sem transformação. Um `LEFT JOIN` de enriquecimento (nome de UF/município, descrição de série/rede) que não encontra correspondência gera NULL aqui, e isso é esperado: o histórico completo precisa ser preservado mesmo quando o enriquecimento falha. |
-| **Silver** | Não permitido em colunas-chave · **permitido, deliberado e reportado** em `proporcao_aluno_nivel_0..8`/`media_portugues` | `transform_silver.py` filtra qualquer linha cujo enriquecimento do bronze tenha falhado (`nome_uf`, `nome_municipio`, `serie`, `rede`, `taxa_alfabetizacao` NULL). As colunas de distribuição por nível de proficiência **não** são forçadas para 0 quando ausentes: ~48% dos municípios/UFs não têm esse detalhamento divulgado pelo INEP na fonte (sigilo estatístico para amostras pequenas), e fabricar `COALESCE(..., 0)` ali violaria a própria consistência da linha (9 colunas de proporção somando 0% junto de uma `taxa_alfabetizacao` real e diferente de zero). O NULL genuíno é preservado e **detectado explicitamente** por `quality/validate.py` (ver Detecção de valores ausentes), em vez de mascarado. `metas_consolidadas` exige que todas as colunas de meta (`meta_alfabetizacao_2024..2030`) estejam preenchidas antes de consolidar a linha. Os eventos de streaming, cujo payload é esparso por tipo de evento, são **despivotados para formato longo** (`streaming_eventos_clean`: uma linha por métrica preenchida), sem inventar valores. |
-| **Gold** | Não permitido em colunas-chave · herda o NULL deliberado de `proporcao_topo` quando a silver não tem distribuição | As tabelas gold fazem `INNER JOIN` (em vez de `LEFT JOIN`) contra `silver.metas_consolidadas`. Estados/municípios sem meta completa na fonte (ex.: Acre não tem `meta_alfabetizacao_2024` em nenhum ano de `bronze.meta_uf`) são **excluídos**, em vez de gerar `meta_2030`/`gap_meta` NULL. `perfil_desempenho_uf.proporcao_topo` fica NULL (não zero) quando a UF não tem distribuição por nível na silver — `AVG`/`SUM` em dashboards ignoram NULL nativamente, evitando que uma ausência de dado puxe a média para baixo como um zero fabricado faria.
-
-### Verificação de duplicidade
-
-`quality/validate.py` verifica ausência de chaves duplicadas em `bronze.alfabetizacao_uf` (`ano`, `sigla_uf`, `serie`, `rede`) e de eventos duplicados em `silver.streaming_eventos_clean` (`pubsub_message_id`, `metrica`); o `dedup` via `ROW_NUMBER()` no silver garante que apenas a ingestão mais recente (`ingestao_ts DESC`) sobrevive por chave.
-
-### Validação de chaves e consistência entre tabelas
-
-- `bronze.alfabetizacao_uf` e `silver.alfabetizacao_uf_clean`: valida que todas as UFs pertencem ao conjunto das 27 UFs válidas.
-- `silver.alfabetizacao_uf_clean`/`alfabetizacao_municipio_clean`: taxa de alfabetização restrita a `[0, 100]`.
-- **Integridade referencial gold → silver**: toda `sigla_uf` de `gold.indicador_por_uf_ano` e todo `id_municipio` de `gold.painel_municipios` devem existir em `silver.metas_consolidadas`, e toda UF de `gold.ranking_estados` deve existir em `silver.alfabetizacao_uf_clean` — chaves órfãs reprovam a validação.
-- `gold.ranking_estados`: cobertura comparada contra `silver.metas_consolidadas` (não contra o total de UFs), já que o universo de estados elegíveis no gold é definido por quem tem meta completa, não por quem tem taxa de alfabetização.
-- **Consistência da distribuição por nível**: quando `proporcao_aluno_nivel_0..8` está preenchida, a soma das 9 colunas deve ficar em `[99, 101]` (tolerância de arredondamento) — garante que o dado da fonte é internamente coerente antes de ser usado em agregações.
-
-### Detecção de valores ausentes
-
-`quality/validate.py --camada all` roda um check de NULL em colunas críticas nas 4 tabelas silver e nas 5 tabelas gold, retornando `exit 1` se qualquer NULL for encontrado nelas — o mesmo mecanismo que interrompe o GitHub Actions em caso de falha (ver seção Monitoramento).
-
-Para as colunas de distribuição por nível (`proporcao_aluno_nivel_0..8` na silver, `proporcao_topo` na gold), o NULL não é tratado como falha de pipeline: `validate.py` mede e **reporta** o percentual de linhas sem essa distribuição (hoje ~48%, por sigilo estatístico do INEP para municípios/UFs com amostra pequena) como uma métrica informativa, sem interromper o build. Tratar essa ausência estrutural como erro — ou pior, mascará-la com `COALESCE(..., 0)` — seria inconsistente com o próprio requisito de "detecção de valores ausentes": um zero fabricado não é detectável como ausência por ninguém a jusante.
-
----
-
-## Monitoramento e FinOps
-
-### Monitoramento
-
-- Cada script registra timestamps, contagem de linhas e erros via `logging`
-- `quality/validate.py` retorna exit code 1 em falha, interrompendo o GitHub Actions e gerando alerta
-- O GitHub Actions notifica falhas por e-mail automaticamente
-
-### FinOps — Práticas Aplicadas
-
-- **Armazenamento colunar**: o BigQuery armazena tudo em formato colunar comprimido (Capacitor, equivalente gerenciado do Parquet) — leituras tocam apenas as colunas selecionadas.
-- **Particionamento por `ano` + clustering** nas tabelas grandes: queries analíticas que filtram por ano/município escaneiam só as partições e blocos relevantes (ver Decisões Arquiteturais).
-- **Full refresh idempotente**: reexecuções substituem as tabelas em vez de acumular versões, mantendo o storage estável.
-- **Micro-lote em vez de streaming insert**: o consumidor grava os eventos consumidos via *load job* (gratuito e ilimitado no BigQuery) em vez do `insertAll` de streaming, que é cobrado por volume — mesma latência prática para o caso de uso e custo zero.
-- **Queries com projeção explícita** (sem `SELECT *`) e agregações feitas uma única vez na gold, não a cada dashboard.
-
-### FinOps — Estimativa de Custo
-
-| Recurso | Uso estimado | Custo |
-|---|---|---|
-| BigQuery Storage | < 1 GB (tabelas do INEP) | $0/mês (free tier: 10 GB) |
-| BigQuery Queries | < 50 MB/execução | $0/mês (free tier: 1 TB) |
-| Pub/Sub | < 1 MB/dia | $0/mês (free tier: 10 GB) |
-| GitHub Actions | < 30 min/dia (~900 min/mês) | $0/mês (free tier: 2.000 min) |
-| **Total estimado** | | **$0/mês** |
-
----
-
-## Aplicação em IA
-
-A camada Gold fornece datasets prontos para treinar modelos preditivos:
-
-**`gold.perfil_desempenho_uf`** — vetor de proporções por nível (0–8) por UF/ano/série:
-- **Clustering de vulnerabilidade**: K-means para agrupar estados por perfil de evolução e identificar regiões que precisam de intervenção prioritária
-- **Regressão temporal**: ARIMA/Prophet para projetar a taxa de alfabetização por estado até 2030 e calcular a probabilidade de atingir a meta
-
-**`gold.indicador_por_uf_ano` + `gold.ranking_estados`**:
-- **Modelos de gap de meta**: prever quais estados não atingirão 100% até 2030 com base na trajetória histórica
-- **Análise de desigualdade**: identificar disparidades entre redes (municipal vs. privada) e entre regiões geográficas
-
-**`gold.painel_municipios`**:
-- **Predição municipal**: modelo XGBoost com features socioeconômicas (IBGE) + taxa de alfabetização para prever municípios de risco
-- **Políticas públicas baseadas em dados**: priorização de recursos do FUNDEB para municípios com maior gap de meta e menor IDH
 
 ---
 
@@ -304,7 +459,7 @@ A camada Gold fornece datasets prontos para treinar modelos preditivos:
 │   └── batch/
 │       └── ingest_bronze.py      # Ingestão de 6 tabelas → bronze
 ├── silver/
-│   └── transform_silver.py       # 5 tabelas silver (limpeza + integração + streaming)
+│   └── transform_silver.py       # 4 tabelas silver (limpeza + integração)
 ├── gold/
 │   └── build_gold.py             # 5 tabelas analíticas gold
 ├── quality/
