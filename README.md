@@ -97,7 +97,7 @@ Para medir esse avanço, o INEP criou o **Indicador Criança Alfabetizada**, que
 | Data Warehouse | **BigQuery** | SQL serverless, 1 TB/mês grátis, sem VMs para gerenciar |
 | Streaming | **Google Pub/Sub** | Integração nativa com BigQuery; 10 GB/mês no free tier |
 | Linguagem | **Python 3.11** | Bibliotecas maduras para GCP; padrão na engenharia de dados |
-| CI/CD | **GitHub Actions** | Orquestração gratuita com autenticação via Workload Identity |
+| CI/CD | **GitHub Actions** | Orquestração gratuita com autenticação via service account (secret `GCP_SA_KEY`); Workload Identity Federation é evolução prevista (ver AS-IS → TO-BE) |
 | Qualidade | **Validações nativas BigQuery** | Sem dependência de frameworks externos |
 
 ---
